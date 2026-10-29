@@ -1,0 +1,11 @@
+{
+  "name": "lumen-studio-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/relay.test.mjs tests/shared-store.test.mjs tests/response-utils.test.mjs tests/i18n.test.mjs",
+    "validate": "node scripts/validate-artifact.mjs"
+  }
+}
