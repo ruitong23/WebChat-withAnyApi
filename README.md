@@ -1,63 +1,89 @@
 # Lumen Studio
 
-模型客户端，中英文界面随浏览器首选语言切换；中文显示中文，其余显示英文。无需 npm 安装依赖；运行需 Node.js 20+。
+A local web client for OpenAI-compatible chat APIs, with model discovery, configurable parameters, reasoning display, and LM Studio model management.
 
-## 本地运行
+The interface follows your browser's preferred language: Chinese for Chinese language settings, and English otherwise.
 
-双击本目录“Start Lumen Studio.bat”（或 `start.cmd`），将出现一个可见 CMD 窗口并自动打开浏览器。保持 CMD 窗口开启，网站会持续运行；关闭窗口或按 Ctrl+C，网站服务停止。无需托盘或后台常驻程序。访问 http://127.0.0.1:4177 。
+## Quick start
 
-1. 打开“API 连接”，填写API 地址和密钥。支持根地址、带代理前缀的地址、`/v1` 地址。
-2. 点击“连接”，工作台请求 `GET /v1/models`，从列表自动选择聊天模型。
-3. 聊天顶部可以搜索和切换模型，右侧调整提示词与采样参数。
+Requires Node.js 20.3 or later. No application dependencies need to be installed.
 
-## 支持功能
+1. Download and extract this repository, or clone it.
+2. On Windows, double-click **`start.bat`**. A CMD window opens and launches the website in your browser.
+3. Open **API connection**, enter your API base URL and optional API key, then click **Connect**.
+4. Select a discovered model and start chatting.
 
-- 自动发现模型、流式／非流式聊天、停止、重试、编辑并重新生成、复制、图片和文本附件。
-- 系统提示词、temperature、top_p、max_tokens、stop、seed、presence_penalty、frequency_penalty、JSON 对象模式、reasoning_effort、额外 JSON 参数。开启扩展采样时发送 top_k、repeat_penalty。
-- 均衡／精确／创意预设，保存自定义预设，各对话独立参数。
-- LM Studio 原生 API：自动检测 `/api/v1/models`、模型元信息、加载状态、加载／卸载、模型下载与进度查询。
-- 加载参数：context_length、eval_batch_size、flash_attention、offload_kv_cache_to_gpu、num_experts（需服务端版本与引擎支持）。
-- Tools JSON 定义、查看工具请求、手动填写执行结果并续聊。不自动运行任意代码／MCP。
-- 嵌入接口测试、多连接档案、日志、浅／深色主题、手机布局、会话导入导出。
+Keep the CMD window open while using the website. Closing it stops the server. The default address is `http://127.0.0.1:4177`.
 
-## 连接与数据
+On other platforms, run:
 
-聊天、附件和连接地址保存在各自浏览器中。API 密钥默认保存在 sessionStorage；勾选“记住密钥”后保存在 localStorage。这些浏览器数据不会进入源码或 GitHub 仓库，也没有加密保存。
+```sh
+node scripts/dev.mjs
+```
 
-发送请求时，聊天内容、附件和 API 密钥会传给填写的 API 服务。转发模式还会经过运行本项目的服务器。API 服务是否记录这些内容，由该服务决定。
+Then open the address shown in the terminal.
 
-共享参数保存在服务器的 `data/model-configs.json`，包含 API 地址、模型 ID、系统提示词和参数；访问同一服务并使用相同 API 地址与模型的用户可以读取和修改。默认监听局域网地址，没有登录验证。只需本机使用时，将 `LUMEN_HOST` 设为 `127.0.0.1`。
+## API compatibility
 
-上传 GitHub 时只提交代码。`.gitignore` 已排除运行数据、聊天导出、密钥文件、环境文件、测试截图和本机部署配置。上传代码本身不会上传浏览器中的聊天记录或 API 密钥。
+Compatibility depends on the API protocol and the features exposed by the server. This client does not support every API format or authenticate with every provider.
 
-右侧模型配置按“规范化后的 API 地址 + 模型 ID”同步，修改后自动保存到工作台服务的 `data/model-configs.json`；访问同一工作台服务的其他浏览器约 3 秒收到更新。关闭再启动仍保留。多人编辑同一个字段冲突时，可采用共享版本或发布自己的修改；不同字段自动合并。聊天记录、附件和 API 密钥不写入共享配置。
+| Capability | Support |
+| --- | --- |
+| Model discovery | `GET /v1/models`; the current connection flow requires a model list |
+| Chat | `POST /v1/chat/completions`, streaming SSE and non-streaming JSON |
+| Authentication | Optional `Authorization: Bearer <key>` |
+| Base URLs | HTTP/HTTPS, root URLs, `/v1` URLs, and reverse-proxy path prefixes |
+| Sampling | Temperature, Top P, presence/frequency penalties, seed, stop sequences, and manual output limits |
+| Extended parameters | Top K, repeat penalty, JSON object output, reasoning effort, and extra request JSON, when supported by the server |
+| Images | Base64 image content in `image_url` messages; requires a vision-capable model and API |
+| Text attachments | Text embedded in the chat request; no separate file-upload API |
+| Reasoning | Common reasoning fields, structured reasoning text, and `<think>` / `<thinking>` tags |
+| Tool calls | Function/tool definitions and manually submitted tool results; no automatic tool execution |
+| Embeddings | A test interface for `POST /v1/embeddings` |
+| Usage | Input/output tokens and cache-hit statistics when returned by the API; output estimates are marked with `≈` |
+| LM Studio management | Model information, load/unload, download, and download status through `/api/v1/models` and its management endpoints |
+| LM Studio load settings | Context length, batch size, Flash Attention, KV-cache offloading, and expert count, when exposed by the server |
 
-服务端 `/api/v1/models` 返回的当前窗口、批大小、Flash Attention、KV Cache 等加载参数会自动读入；服务端信息约 15 秒刷新一次。共享的加载参数是下一次加载时的计划值，不会自动卸载或重载服务端。输入框下方“窗口”始终取当前服务端返回值；API 不返回时显示“服务端未返回”。
+Sampling overrides and output-token limits are **off by default**. No `max_tokens` or `max_completion_tokens` limit is added unless you explicitly configure one. History trimming is also off by default.
 
-温度、Top P 等原版界面的当前值，标准 API 通常不提供；默认显示“服务端默认”，不向请求中擅自写入采样值。点击对应字段的“服务端默认 · 点击设置”后，才会编辑并发送你指定的覆盖值；再次点击可恢复跟随服务端。可以在右侧“导入预设”导入 LM Studio 预设 JSON（只提取参数），确认后共享给所有访问同一工作台的用户。
+Some APIs reject `stream_options.include_usage`; disable **Include usage** for those servers. API-specific parameters may require **Extra parameters**, and unsupported fields can still be rejected by the server.
 
-默认不发送 `max_tokens` 或 `max_completion_tokens`，内置采样预设也不会额外设置输出上限。只有手动开启最大输出覆盖并填写正数时才发送该限制。默认不裁剪聊天历史（历史消息数为 0），生成流也没有网页额外添加的固定五分钟超时。升级时移除旧版自动套用的限制，旧参数保存在会话的 `legacyParameterBackup` 中。
+### Current limits
 
-模型返回的思考内容支持独立 reasoning 字段、结构化思考文本和 `<think>` 标签。展开状态在流式更新后保持不变；输入框上方的小区域会显示实际收到的最近思考片段、耗时和接收进度。模型没有提供思考文本时会如实显示等待状态。
+- No native OpenAI Responses API, Anthropic Messages API, Gemini API, or Azure-specific API-key/query-parameter adapter. A compatible Chat Completions gateway may work if it exposes the required endpoints.
+- No OAuth login, custom authentication headers, automatic agents/MCP execution, audio/video APIs, image generation, or PDF parsing.
+- Context-window and current load information are read from LM Studio's native API. Standard chat APIs often do not expose their active server settings.
+- Cache statistics display what the API reports; this client does not enable or control server-side caching.
+- Protocol behavior is covered by local mock-server tests. Individual providers and models have not all been tested with live credentials.
 
-输入框下方及回复下方显示已接收输出 token；优先采用 API 用量，没有返回用量时按文本字符估算，明确显示“≈ / 估算”。还显示字符数、流事件数和本对话累计接收量，流事件数不当作 token 数。API 返回 `finish_reason=length` 或流在结束标记前断开时，页面保留已接收的思考和正文，显示原因，并提供“继续生成”。继续是用户点击后发起的新请求，不会自动更改你的参数。
+## Features
 
-输入框下方显示最近一次响应的缓存命中 tokens／比例、本次输入加输出 token 用量和服务端当前窗口。缓存统计支持 `prompt_tokens_details.cached_tokens`、`input_tokens_details.cached_tokens`、DeepSeek `prompt_cache_hit_tokens` 等格式。接口未返回时显示“未返回”。流式请求默认携带 `stream_options.include_usage=true`，不支持此字段的 API 可关闭“请求流式用量统计”。统计以各自请求的 API 返回为准，不用其他用户的请求数字代替。
+- Multiple API connections, model search, chat history, import/export, attachments, and light/dark themes.
+- Streaming responses, stop/retry, edit/regenerate, reasoning display, and received-token counters.
+- Parameter presets, system prompts, request previews, and per-model shared settings.
+- LM Studio model management when its native management API is available.
 
-同一局域网的其他设备可以使用 CMD 中显示的“Shared workspace”地址访问此服务。每个人仍填写自己的 API 连接信息，使用相同的 API 地址与模型即可共享参数。配置适用于能访问此工作台的用户，用户均可查看和修改；各自启动独立 BAT 是独立工作台，不会互相同步。默认监听 `0.0.0.0:4177`；只需本机访问时可设置环境变量 `LUMEN_HOST=127.0.0.1`。
+## Data and privacy
 
-默认采用同源转发，解决浏览器 CORS 限制。密钥随请求转发至指定服务端。本项目服务器不持久化聊天正文、附件或 API 密钥；共享参数中的系统提示词会保存到配置文件。日志仅在浏览器内存中保存路径、状态与耗时。密钥默认使用 sessionStorage；勾选记住密钥后使用 localStorage。聊天保存在当前浏览器，可导出 JSON 备份，备份不包含 API 密钥。
+- Chats, chat attachments, and connection profiles are stored in each browser's local storage.
+- API keys use session storage by default. **Remember key** uses local storage. Browser storage is not encrypted.
+- Requests send chat content, attachments, and the API key to the API URL you configure. Proxy mode also passes them through the machine running this application. The upstream service controls its own retention policy.
+- The application server does not persist chat bodies, chat attachments, or API keys. Shared model settings, including system prompts, API source URLs, model IDs, and parameters, are saved in `data/model-configs.json`.
+- Users of the same server and API/model combination can read and edit shared settings. There is currently no login or per-user access control.
+- The server listens on `0.0.0.0:4177` by default for LAN access. Set `LUMEN_HOST=127.0.0.1` for access from the same computer only. Set `PORT` to change the port.
+- `.gitignore` excludes runtime data, exports, environment files, private-key files, test output, and local deployment configuration. Browser data is not part of the repository.
 
-本地版可连接内网／localhost。在线版使用公开可达的服务端地址。HTTPS 页面的浏览器直连受 CORS、混合内容和本地网络访问限制影响。地址中的查询参数、账号密码和重定向不被转发。
+Use the Node server for the complete application. Static hosting alone does not provide the API proxy or shared-settings service.
 
-参数是否可用由 API 和引擎决定，不支持时显示真实错误。GPU 层数、显存分配、引擎管理和本机 MCP 进程不由本网页 API 提供。本项目不冒充 LM Studio 官方产品。
+## Development
 
-## 验证与构建
+```sh
+npm start
+npm test
+```
 
-- `npm test`：转发、鉴权、流式响应、路径、原生管理和访问边界测试。
-- `npm run build`：自包含 Cloudflare Worker 到 `dist/server/index.js`。
-- `npm run validate`：验证部署导出与配置。
+`src/` contains the frontend, relay, and shared-settings store. `scripts/dev.mjs` runs the local Node server. Optional browser checks require Playwright and Chrome.
 
-源文件 `src/`，开发服务器 `scripts/dev.mjs`。`worker/index.js` 由构建脚本组合生成。未内置用户服务端地址或密钥。
+`npm run build` creates a Worker artifact in `dist/server/index.js`; `npm run validate` checks that artifact. The Worker artifact currently provides the frontend and relay, while the shared-settings API is implemented by the Node server.
 
-API 字段参考：https://lmstudio.ai/docs/developer/rest 和 https://lmstudio.ai/docs/developer/openai-compat/chat-completions
+This is an independent client and is not an official LM Studio product.
