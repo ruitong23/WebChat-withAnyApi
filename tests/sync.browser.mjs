@@ -1,7 +1,7 @@
 import {chromium} from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {DatabaseSync} from 'node:sqlite';
+import {createWorkspaceStore} from '../src/workspace-store.mjs';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {mkdtemp,mkdir,readFile} from 'node:fs/promises';
@@ -9,8 +9,8 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
-await mkdir(join(root,'work/upgrade-qa'),{recursive:true});
-const directory=await mkdtemp(join(root,'work/upgrade-qa/data-')),file=join(directory,'workspace.sqlite');
+await mkdir(join(root,'work/sync-qa'),{recursive:true});
+const directory=await mkdtemp(join(root,'work/sync-qa/data-')),file=join(directory,'workspace.json');
 let browser,server,output='',privateAllowed=true;
 const auth=[],sentAfterSave=[];
 const mock=http.createServer(async(req,res)=>{
@@ -20,7 +20,7 @@ const mock=http.createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');
  if(req.url==='/v1/models')return res.end(JSON.stringify({data:[{id:'upgrade-test'}]}));
  if(req.url==='/v1/chat/completions'){
-  const body=JSON.parse(text),index=JSON.parse(await readFile(file+'.json','utf8'));
+  const body=JSON.parse(text),index=JSON.parse(await readFile(file,'utf8'));
   const saved=await Promise.all(index.data.chats.map(c=>readFile(join(directory,c.path),'utf8').then(JSON.parse)));
   sentAfterSave.push(saved.some(c=>c.messages.some(m=>m.role==='user'&&m.content===body.messages.at(-1).content)));
   res.setHeader('Content-Type','text/event-stream');res.end('data: '+JSON.stringify({choices:[{delta:{content:'模拟模型回答'},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');return;
@@ -29,11 +29,8 @@ const mock=http.createServer(async(req,res)=>{
 });
 await new Promise(r=>mock.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+mock.address().port;
 const reserve=http.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));const url='http://127.0.0.1:'+port;
-const db=new DatabaseSync(file);
-db.exec("PRAGMA journal_mode=WAL; CREATE TABLE items(kind TEXT,id TEXT,revision INTEGER,value TEXT,updated INTEGER,PRIMARY KEY(kind,id)); CREATE TABLE meta(key TEXT PRIMARY KEY,value INTEGER); INSERT INTO meta VALUES('revision',50);");
-const put=db.prepare('INSERT INTO items VALUES(?,?,?,?,?)');
-put.run('chat','seed',3,JSON.stringify({id:'seed',title:'旧版小说',messages:[{id:'seed-user',role:'user',content:'原来的正文'}],model:'upgrade-test',created:1}),1);
-for(const id of ['one','two'])put.run('profile',id,2,JSON.stringify({id,name:'连接 '+id,baseUrl:base,mode:'proxy',remember:false,apiKey:'test-'+id}),2);
+const profiles=['one','two'].map(id=>({id,name:'连接 '+id,baseUrl:base,mode:'proxy',remember:true}));
+await createWorkspaceStore(file).update(0,{parameterPolicyVersion:1,chats:[{id:'seed',title:'小说对话',messages:[{id:'seed-user',role:'user',content:'原来的正文'}],model:'upgrade-test',created:1}],projects:[],profiles,profile:profiles[0],keys:{one:'test-one',two:'test-two'},active:'seed'});
 const wait=async(check,label)=>{for(let i=0;i<250;i++){if(await check())return;await new Promise(r=>setTimeout(r,50));}throw new Error('Timeout: '+label+'\n'+output);};
 const start=async()=>{
  server=spawn(process.execPath,['scripts/dev.mjs'],{cwd:root,env:{...process.env,PORT:String(port),LUMEN_HOST:'127.0.0.1',LUMEN_PUBLIC_ORIGIN:url,LUMEN_ALLOW_PRIVATE:String(privateAllowed),LUMEN_WORKSPACE_FILE:file,LUMEN_CONFIG_FILE:join(directory,'model-configs.json')},windowsHide:true,stdio:'pipe'});
@@ -57,9 +54,9 @@ try{
  await page.locator('[data-profile="two"]').click();await connected(page);assert(auth.includes('Bearer test-two'));assert.equal(await page.locator('.profile-tab.active').getAttribute('data-profile'),'two');
  await page.locator('[data-profile="one"]').click();await connected(page);await saved(page);
  assert(responses.every(s=>!s.includes('test-one')&&!s.includes('test-two')));assert.equal((await record()).data.keys,undefined);
- assert.equal(JSON.parse(await readFile(file+'.json','utf8')).data.keys.one,'test-one');
+ assert.equal(JSON.parse(await readFile(file,'utf8')).data.keys.one,'test-one');
  await page.locator('[data-page="chat"]').first().click();
- console.log('PASS original service env and SQLite/WAL upgrade, same-URL profiles, blank key preservation and secret-free responses');
+ console.log('PASS server configuration, same-URL profiles, blank key preservation and secret-free responses');
 
  const peerContext=await browser.newContext({locale:'zh-CN'}),peer=await peerContext.newPage();peer.on('pageerror',e=>errors.push(e.message));
  await peer.goto(url);await connected(peer);await saved(peer);await peer.locator('#prompt').fill('保留我正在写的草稿');
@@ -73,7 +70,7 @@ try{
  await page.route('**/api/workspace?**',route=>route.request().url().includes('since=')?route.fulfill({status:304}):route.continue());
  original=await chat('seed');await patch({chats:[{id:'seed',baseEtag:original._etag,chat:{...original.chat,title:'远端新标题'}}]});
  await page.locator('#prompt').fill('并发情况下继续写小说');await page.locator('#send').click();await page.getByText('模拟模型回答',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('#send')?.dataset.action==='send');await saved(page);
- const index=JSON.parse(await readFile(file+'.json','utf8')),copy=index.data.chats.find(c=>c.id!=='seed');assert(copy);assert.match(copy.title,/冲突副本/);
+ const index=JSON.parse(await readFile(file,'utf8')),copy=index.data.chats.find(c=>c.id!=='seed');assert(copy);assert.match(copy.title,/冲突副本/);
  assert.equal((await chat('seed')).chat.title,'远端新标题');assert((await chat(copy.id)).chat.messages.some(m=>m.content==='模拟模型回答'));assert(sentAfterSave.every(Boolean));
  assert.equal((await record()).data.active,copy.id);await page.reload();await page.getByText('模拟模型回答',{exact:true}).waitFor();await connected(page);
  console.log('PASS concurrent send preserves the remote original and saves all output to a conflict copy before and after reload');
@@ -94,6 +91,6 @@ try{
  await stop();privateAllowed=false;await start();
  const response=await fetch(url+'/api/relay',{method:'POST',headers:{Origin:url,'Content-Type':'application/json'},body:JSON.stringify({baseUrl:base,profileId:'one',path:'/v1/models'})});assert.equal(response.status,400);
  const denied=await fetch(url+'/api/workspace',{method:'PATCH',headers:{Origin:'https://other.test','Content-Type':'application/json'},body:'{}'});assert.equal(denied.status,403);
- assert.equal((await record()).data.profiles.length,2);assert.equal(db.prepare('SELECT count(*) AS n FROM items').get().n,3);assert.deepEqual(errors,[]);
- console.log('PASS restart keeps migrated data; LUMEN_ALLOW_PRIVATE=false and the configured public origin remain effective');
-}finally{await browser?.close();await stop();db.close();mock.closeAllConnections();await new Promise(r=>mock.close(r));}
+ assert.equal((await record()).data.profiles.length,2);assert.deepEqual(errors,[]);
+ console.log('PASS restart keeps server data; LUMEN_ALLOW_PRIVATE=false and the configured public origin remain effective');
+}finally{await browser?.close();await stop();mock.closeAllConnections();await new Promise(r=>mock.close(r));}

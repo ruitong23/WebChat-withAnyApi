@@ -2,7 +2,7 @@
 
 此版本将对话、附件、连接配置、勾选保存的 API 密钥和预设保存在运行 Node 服务的服务器磁盘。访问同一服务的浏览器使用同一个工作空间；本次未加入登录或账号隔离。已保存的密钥按连接 ID 分开，以明文写入服务器私有数据文件，接口仅返回是否已保存；浏览器临时输入的密钥仅留在当前页面内存中。
 
-**推荐直接运行 Git 仓库源码**：`node scripts/dev.mjs`。后续 `git pull --ff-only origin main` 后重启 Node 服务即可，不必构建或上传文件包。已有服务器定制版、SQLite 数据和原 Nginx/systemd 配置的兼容步骤见 [旧服务器升级指南](UPGRADE.md)。下方构建方式为可选的独立目录部署。
+**推荐直接运行 Git 仓库源码**：`node scripts/dev.mjs`。后续 `git pull --ff-only origin main` 后重启 Node 服务即可，不必构建或上传文件包。运行数据和本机配置独立于 Git 源码。下方构建方式为可选的独立目录部署。
 
 仅上传 HTML/JS/CSS 到 Nginx 静态目录不能保存服务器文件。需要同时启动下方 Node 服务，并将同一域名的 `/api/` 请求转发给它。Node.js 20.3 或更高版本即可，无需安装 npm 依赖。
 
@@ -61,6 +61,17 @@ sudo systemctl reload nginx
 Nginx 配置依据：[代理模块](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)、[HTTP 核心模块](https://nginx.org/en/docs/http/ngx_http_core_module.html)。
 
 ## 数据与升级
+
+直接运行仓库的服务器在更新前等待生成和保存结束，然后执行：
+
+```sh
+cd /opt/WebChat-withAnyApi
+git pull --ff-only origin main && sudo systemctl restart lumen-webchat
+```
+
+将路径及服务名换成实际值。systemd 启动命令应为仓库中的 `node scripts/dev.mjs`；Nginx 可将整个网站代理到 Node。保留已有 HTTPS、登录和代理设置即可。不要在服务器上直接修改受 Git 管理的源码，本机配置放在 systemd 环境变量中，数据目录放在 `/var/lib/` 等持久位置。
+
+支持 `LUMEN_WORKSPACE_FILE` 指定 JSON 索引路径、`LUMEN_CONFIG_FILE` 指定模型配置路径，或使用 `LUMEN_DATA_DIR` 指定统一数据目录。`LUMEN_PUBLIC_ORIGIN` 可指定浏览器访问的完整来源，如 `https://chat.example.com`；`LUMEN_ALLOW_PRIVATE=false` 禁止向 localhost/内网地址转发，连接本机或内网模型时可以设为 `true`。未设置时允许内网，以兼容本地模型。
 
 每个项目和每条对话分别保存，目录结构为：
 

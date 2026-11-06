@@ -5,8 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {join,resolve,sep} from 'node:path';
 import {createWorkspaceStore,validateWorkspace,conversationPath,projectPath} from '../src/workspace-store.mjs';
 import {mergeWorkspace,createWorkspacePersistence} from '../src/workspace-client.js';
-import {publicRecord} from '../src/workspace-compat.mjs';
-import {DatabaseSync} from 'node:sqlite';
+import {publicRecord} from '../src/workspace-public.mjs';
 
 const fixtureRoot=fileURLToPath(new URL('../work/workspace-tests/',import.meta.url));await mkdir(fixtureRoot,{recursive:true});
 const removeFixture=async directory=>{const full=resolve(directory);assert(full.startsWith(resolve(fixtureRoot)+sep));await rm(full,{recursive:true,force:true});};
@@ -152,30 +151,6 @@ test('a coalesced no-op save still publishes the acknowledged sidebar counts',as
  assert(await client.flush());assert.deepEqual(states,[[2,false],[2,true]]);assert.equal(client.dirty,false);
 });
 
-test('legacy SQLite migrates a consistent WAL snapshot once and keeps same-URL profile keys separate',async()=>{
- const dir=await mkdtemp(join(fixtureRoot,'sqlite-')),path=join(dir,'workspace.sqlite');
- const db=new DatabaseSync(path);
- try{
-  db.exec("PRAGMA journal_mode=WAL; CREATE TABLE items(kind TEXT,id TEXT,revision INTEGER,value TEXT,updated INTEGER,PRIMARY KEY(kind,id)); CREATE TABLE meta(key TEXT PRIMARY KEY,value INTEGER); INSERT INTO meta VALUES('revision',42);");
-  const insert=db.prepare('INSERT INTO items VALUES(?,?,?,?,?)');
-  insert.run('chat','old',2,JSON.stringify(chat('old')),1);
-  for(const id of ['one','two'])insert.run('profile',id,3,JSON.stringify({id,name:id,baseUrl:'https://same.test',nativeUrl:'https://manage.test',apiKey:'test-key-'+id}),2);
-  const store=createWorkspaceStore(path),record=await store.getSidebar(),response=publicRecord(record);
-  assert.equal(record.revision,42);assert.equal((await store.getChat('old')).chat.messages[0].content,'old');
-  assert.equal(response.data.profiles.length,2);assert(response.data.profiles.every(p=>p.hasKey&&p._etag));assert(!JSON.stringify(response).includes('test-key-'));assert.equal(response.data.keys,undefined);
-  assert.equal(await store.keyFor('https://same.test/v1','one'),'test-key-one');assert.equal(await store.keyFor('https://same.test','two'),'test-key-two');
-  assert.equal(await store.keyFor('https://manage.test','one'),'test-key-one');assert.equal(await store.keyFor('https://other.test','one'),'');
-  const second=response.data.profiles.find(p=>p.id==='two');
-  await store.patch({profiles:[{id:'two',baseEtag:second._etag,profile:{...second,name:'Edited without key'}}]});
-  assert.equal(await store.keyFor('https://same.test','two'),'test-key-two');
-  db.prepare('UPDATE items SET value=? WHERE id=?').run(JSON.stringify(chat('old','SQLite changed after migration')),'old');
-  assert.equal((await createWorkspaceStore(path).getChat('old')).chat.messages[0].content,'old','Migration is not repeated after the JSON index exists');
-  assert.equal(db.prepare('SELECT count(*) AS n FROM items').get().n,3,'Original database remains intact');
-  const disk=JSON.parse(await readFile(path+'.json','utf8'));assert.equal(disk.migratedFrom,'sqlite');assert.equal(disk.data.keys.two,'test-key-two');
-  await store.patch({clearKeys:true});assert.equal(await store.keyFor('https://same.test','one'),'');assert(publicRecord(await store.getSidebar()).data.profiles.every(p=>!p.hasKey));
- }finally{db.close();await removeFixture(dir);}
-});
-
 test('concurrent chat edits and edit-after-delete save independent conflict and recovery copies',async()=>{
  const dir=await mkdtemp(join(fixtureRoot,'copies-')),store=createWorkspaceStore(join(dir,'workspace.json'));
  try{
@@ -227,10 +202,4 @@ test('a pending local save never turns an unseen remote connection addition into
  });
  const client=createWorkspacePersistence({initial,read:()=>structuredClone(local)});
  local.chats[0].title='first';client.save();const first=client.flush();local.chats[0].title='second';client.save();release();assert(await first);assert(await client.flush());
-});
-
-test('an unreadable SQLite database fails without creating an empty JSON replacement',async()=>{
- const dir=await mkdtemp(join(fixtureRoot,'sqlite-damaged-')),path=join(dir,'workspace.sqlite');
- try{await writeFile(path,'damaged database');await assert.rejects(createWorkspaceStore(path).get());assert.equal(await readFile(path,'utf8'),'damaged database');await assert.rejects(readFile(path+'.json'),{code:'ENOENT'});}
- finally{await removeFixture(dir);}
 });

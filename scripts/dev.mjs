@@ -5,7 +5,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createModelConfigStore} from '../src/shared-store.mjs';
 import {createWorkspaceStore} from '../src/workspace-store.mjs';
-import {publicRecord,publicResult} from '../src/workspace-compat.mjs';
+import {publicRecord,publicResult} from '../src/workspace-public.mjs';
 import {networkInterfaces} from 'node:os';
 import {join} from 'node:path';
 const port=Number(process.env.PORT||4177),root=new URL('../src/',import.meta.url);

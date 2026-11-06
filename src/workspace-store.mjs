@@ -1,7 +1,7 @@
 import {readFile,mkdir,writeFile,rename,rm,rmdir} from 'node:fs/promises';
 import {dirname,resolve,sep} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {readLegacySQLite,publicProfile,matchingProfile} from './workspace-compat.mjs';
+import {publicProfile,matchingProfile} from './workspace-public.mjs';
 
 const fields=new Set(['parameterPolicyVersion','profile','profiles','chats','projects','active','activeProject','sidebar','theme','inspector','presets','keys']);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
@@ -28,8 +28,6 @@ export function validateWorkspace(value){
 // The index commits a collection of independent project/chat files. A small
 // write-ahead journal lets a restarted process finish interrupted multi-file saves.
 export function createWorkspaceStore(filePath){
- const legacyPath=/\.(sqlite3?|db)$/i.test(filePath)?resolve(filePath):null;
- if(legacyPath)filePath=legacyPath+'.json';
  filePath=resolve(filePath);const root=dirname(filePath),journalPath=filePath+'.pending.json';let queue=Promise.resolve();
  const enqueue=work=>{const operation=queue.then(work);queue=operation.then(()=>{},()=>{});return operation;};
  const target=path=>{const full=resolve(root,path);if(!full.startsWith(root+sep)||! /^(?:conversations\/[a-z0-9-]+\.json|projects\/[a-z0-9-]+\/(?:project\.json|conversations\/[a-z0-9-]+\.json))$/.test(path))throw new Error('存储路径无效');return full;};
@@ -73,8 +71,6 @@ export function createWorkspaceStore(filePath){
  const loadIndex=async()=>{
   await recover();let index;try{index=await read(filePath);}catch(error){
    if(error.code!=='ENOENT')throw error;
-   if(legacyPath){let exists=true;try{await readFile(legacyPath);}catch(e){if(e.code==='ENOENT')exists=false;else throw e;}
-    if(exists){const record=await readLegacySQLite(legacyPath);validateWorkspace(record.data);await commit({data:{}},record);return indexFor(record);}}
    return {version:2,revision:0,data:{}};
   }
   if(index.version===1){
