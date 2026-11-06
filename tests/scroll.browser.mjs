@@ -35,8 +35,8 @@ const seed={parameterPolicyVersion:1,active:'history',profile:{name:'Scroll QA',
 const position=page=>page.locator('#conversation').evaluate(c=>({top:c.scrollTop,gap:c.scrollHeight-c.scrollTop-c.clientHeight}));
 const settled=page=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const stable=async(page,top,label)=>{await settled(page);const actual=await position(page);assert(Math.abs(actual.top-top)<=1,`${label}: expected top ${top}, actual ${JSON.stringify(actual)}`);};
-const lastQuestionVisible=page=>page.evaluate(()=>{
- const c=document.querySelector('#conversation'),m=document.querySelector('#msg-u3');
+const lastAnswerVisible=page=>page.evaluate(()=>{
+ const c=document.querySelector('#conversation'),m=document.querySelector('#msg-a3');
  return Math.abs(m.getBoundingClientRect().top-c.getBoundingClientRect().top-20)<=1;
 });
 try{
@@ -50,7 +50,7 @@ try{
   const seeded=await fetch(url+'/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:existing.revision,data:seed})});assert.equal(seeded.status,200);
   const page=await context.newPage();page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('API 已连接'));
-  assert(await lastQuestionVisible(page),'Opening history must align the last user question');
+  assert(await lastAnswerVisible(page),'Opening history must align the last model answer');
   assert((await position(page)).gap>100,'Opening history must not jump to the answer bottom');
   await page.screenshot({path:fileURLToPath(new URL(label+'-history.png',captures))});
   const readingTop=(await position(page)).top;
@@ -59,9 +59,9 @@ try{
   if(mobile)await page.locator('[data-action="sidebar"]').click();
   await page.locator('[data-chat="other"]').click();await page.waitForFunction(()=>document.querySelector('#conversation')?.dataset.chat==='other');
   if(mobile)await page.locator('[data-action="sidebar"]').click();
-  await page.locator('[data-chat="history"]').click();await page.waitForFunction(()=>document.querySelector('#conversation')?.dataset.chat==='history');assert(await lastQuestionVisible(page),'Switching chats must locate the last question');
+  await page.locator('[data-chat="history"]').click();await page.waitForFunction(()=>document.querySelector('#conversation')?.dataset.chat==='history');assert(await lastAnswerVisible(page),'Switching chats must locate the last model answer');
   await page.reload();await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('API 已连接'));
-  assert(await lastQuestionVisible(page),'Reload must locate the last question');
+  assert(await lastAnswerVisible(page),'Reload must locate the last model answer');
 
   stream=null;await page.locator('#prompt').fill('请持续生成一段长回答');await page.locator('#send').click();
   for(let i=0;!stream&&i<100;i++)await new Promise(resolve=>setTimeout(resolve,20));assert(stream,'SSE request started');

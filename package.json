@@ -10,6 +10,7 @@
     "test:projects": "node tests/projects.browser.mjs",
     "test:paging": "node tests/paging.browser.mjs",
     "test:sync": "node tests/sync.browser.mjs",
+    "test:generation": "node tests/generation.browser.mjs",
     "test:scroll": "node tests/scroll.browser.mjs",
     "validate": "node scripts/validate-artifact.mjs"
   }

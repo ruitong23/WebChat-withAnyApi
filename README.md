@@ -60,6 +60,7 @@ Some APIs reject `stream_options.include_usage`; disable **Include usage** for t
 
 - Multiple API connections, model search, chat history, import/export, attachments, and light/dark themes.
 - Streaming responses, stop/retry, edit/regenerate, reasoning display, and received-token counters.
+- Open history at the beginning of the latest assistant reply. Browse other chats/pages during generation, with per-chat spinners, drafts, concurrent requests, and independent stop controls.
 - Parameter presets, system prompts, request previews, and per-model shared settings.
 - LM Studio model management when its native management API is available.
 
@@ -91,5 +92,7 @@ npm test
 `npm run build` creates a self-contained Node deployment in `dist/`, including `public/`, `server/`, and Nginx/systemd examples. `npm run validate` checks its paths and JavaScript syntax. No npm dependencies are needed at runtime.
 
 `npm run test:sync` exercises same-address credentials, secret-free responses, live synchronization, conflict copies, presets-only import, unsaved protection, and service configuration against local mock APIs.
+
+`npm run test:generation` checks desktop/mobile navigation during generation, per-chat activity, concurrent streams, drafts, connection/model isolation, project moves, conflict copies, and saved output after reload.
 
 This is an independent client and is not an official LM Studio product.

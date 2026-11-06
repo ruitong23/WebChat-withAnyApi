@@ -31,7 +31,7 @@ try{
  assert.equal(await page.locator('#chat-list button[data-chat]').count(),2,'The project and ungrouped chats share the same list budget');
  await page.locator('[data-action="new-chat"]').click();await saved();const draft=(await record()).data.chats.find(c=>c.id!==c1.id&&c.id!==c2.id);
  assert.equal(draft.projectId,a.id,'New chats inherit the selected project');
- await page.locator('[data-delete-chat="'+draft.id+'"]').click();await page.locator('.modal [data-action="confirm"]').click();await saved();
+ await page.locator('[data-delete-chat="'+draft.id+'"]').click();await page.locator('.modal [data-action="confirm"]').click();await page.waitForFunction(id=>document.querySelector('#conversation')?.dataset.chat===id,c1.id);await saved();
  assert.equal(await page.locator('#conversation').getAttribute('data-chat'),c1.id,'Deleting the selected chat stays within its project');
  console.log('PASS project creation moves the current chat into its own directory and keeps its messages');
 
