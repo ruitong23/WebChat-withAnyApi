@@ -1,6 +1,7 @@
 import {readFile,mkdir,writeFile,rename,rm,rmdir} from 'node:fs/promises';
 import {dirname,resolve,sep} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
+import {readLegacySQLite,publicProfile,matchingProfile} from './workspace-compat.mjs';
 
 const fields=new Set(['parameterPolicyVersion','profile','profiles','chats','projects','active','activeProject','sidebar','theme','inspector','presets','keys']);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
@@ -19,7 +20,7 @@ export function validateWorkspace(value){
  if(value.activeProject!==undefined&&typeof value.activeProject!=='string')throw new Error('项目数据格式无效');
  if(value.sidebar!==undefined&&(!object(value.sidebar)||!Array.isArray(value.sidebar.expandedProjects)||!value.sidebar.expandedProjects.every(id=>typeof id==='string')||!Number.isSafeInteger(value.sidebar.limit)||value.sidebar.limit<15||value.sidebar.limit>100000||value.sidebar.filter!==undefined&&typeof value.sidebar.filter!=='string'||value.sidebar.scrollTop!==undefined&&(!Number.isFinite(value.sidebar.scrollTop)||value.sidebar.scrollTop<0)))throw new Error('目录加载设置无效');
  if(value.presets!==undefined&&(!Array.isArray(value.presets)||!value.presets.every(p=>object(p)&&typeof p.name==='string'&&object(p.params))))throw new Error('预设格式无效');
- if(value.keys!==undefined&&(!object(value.keys)||!Object.entries(value.keys).every(([base,key])=>{try{return ['http:','https:'].includes(new URL(base).protocol)&&typeof key==='string'&&key.length<=16000&&!/[\r\n]/.test(key);}catch{return false;}})))throw new Error('API Key 格式不正确');
+ if(value.keys!==undefined&&(!object(value.keys)||!Object.entries(value.keys).every(([base,key])=>{try{return (/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(base)||['http:','https:'].includes(new URL(base).protocol))&&!['constructor','prototype','__proto__'].includes(base)&&typeof key==='string'&&key.length<=16000&&!/[\r\n]/.test(key);}catch{return false;}})))throw new Error('API Key 格式不正确');
  if(value.active!==undefined&&typeof value.active!=='string'||value.theme!==undefined&&!['light','dark'].includes(value.theme)||value.inspector!==undefined&&typeof value.inspector!=='boolean')throw new Error('工作空间数据格式无效');
  return structuredClone(value);
 }
@@ -27,6 +28,8 @@ export function validateWorkspace(value){
 // The index commits a collection of independent project/chat files. A small
 // write-ahead journal lets a restarted process finish interrupted multi-file saves.
 export function createWorkspaceStore(filePath){
+ const legacyPath=/\.(sqlite3?|db)$/i.test(filePath)?resolve(filePath):null;
+ if(legacyPath)filePath=legacyPath+'.json';
  filePath=resolve(filePath);const root=dirname(filePath),journalPath=filePath+'.pending.json';let queue=Promise.resolve();
  const enqueue=work=>{const operation=queue.then(work);queue=operation.then(()=>{},()=>{});return operation;};
  const target=path=>{const full=resolve(root,path);if(!full.startsWith(root+sep)||! /^(?:conversations\/[a-z0-9-]+\.json|projects\/[a-z0-9-]+\/(?:project\.json|conversations\/[a-z0-9-]+\.json))$/.test(path))throw new Error('存储路径无效');return full;};
@@ -68,7 +71,12 @@ export function createWorkspaceStore(filePath){
   const record={...index,data:{...index.data,projects,chats}};validateWorkspace(record.data);return record;
  };
  const loadIndex=async()=>{
-  await recover();let index;try{index=await read(filePath);}catch(error){if(error.code==='ENOENT')return {version:2,revision:0,data:{}};throw error;}
+  await recover();let index;try{index=await read(filePath);}catch(error){
+   if(error.code!=='ENOENT')throw error;
+   if(legacyPath){let exists=true;try{await readFile(legacyPath);}catch(e){if(e.code==='ENOENT')exists=false;else throw e;}
+    if(exists){const record=await readLegacySQLite(legacyPath);validateWorkspace(record.data);await commit({data:{}},record);return indexFor(record);}}
+   return {version:2,revision:0,data:{}};
+  }
   if(index.version===1){
    if(!Number.isSafeInteger(index.revision)||index.revision<0)throw new Error('服务器工作空间文件格式无效');validateWorkspace(index.data);
    const record={...index,version:2,data:{...index.data,projects:(index.data.projects||[]).map(p=>({...p,path:projectPath(p.id)}))}};
@@ -96,14 +104,30 @@ export function createWorkspaceStore(filePath){
  const patch=async changes=>{
   if(!object(changes)||!object(changes.settings||{})||!Array.isArray(changes.chats||[])||!Array.isArray(changes.projects||[])||!Array.isArray(changes.moves||[]))throw new Error('工作空间数据格式无效');
   const index=await loadIndex();index.data.chats=index.data.chats||[];index.data.projects=index.data.projects||[];
-  const conflicts=[],writes=new Map(),removals=new Set(),etags={},projectEtags={};
+  const conflicts=[],writes=new Map(),removals=new Set(),etags={},projectEtags={},remaps={chats:{},profiles:{}};
   const settings=changes.settings||{},settingsBase=changes.settingsBase||{};
   if(Object.keys(settings).some(key=>!fields.has(key)||['chats','projects'].includes(key)))throw new Error('工作空间数据格式无效');
   validateWorkspace({...settings,chats:[],projects:[]});
-  for(const key of ['profile','profiles','keys','presets'])if(Object.hasOwn(settings,key)&&Object.hasOwn(settingsBase,key)&&JSON.stringify(index.data[key])!==JSON.stringify(settingsBase[key])&&JSON.stringify(index.data[key])!==JSON.stringify(settings[key]))conflicts.push(key);
+  for(const key of ['keys','presets'])if(Object.hasOwn(settings,key)&&Object.hasOwn(settingsBase,key)&&JSON.stringify(index.data[key])!==JSON.stringify(settingsBase[key])&&JSON.stringify(index.data[key])!==JSON.stringify(settings[key]))conflicts.push(key);
   for(const p of changes.projects||[]){const old=index.data.projects.find(v=>v.id===p.id);if((old?._etag??null)!==(p.baseEtag??null))conflicts.push('projects:'+p.id);}
-  for(const c of changes.chats||[]){const old=index.data.chats.find(v=>v.id===c.id);if((old?._etag??null)!==(c.baseEtag??null))conflicts.push('chats:'+c.id);}
   if(conflicts.length)return {conflict:true,conflicts,record:page(index)};
+  if(!Array.isArray(changes.profiles||[]))throw new Error('连接配置格式无效');
+  index.data.profiles=index.data.profiles||[];index.data.keys={...index.data.keys};
+  const profileEtag=p=>etag({...publicProfile(p,index.data.keys),hasKey:undefined,secret:index.data.keys[p.id]??index.data.keys[p.baseUrl]??''});
+  for(const change of changes.profiles||[]){
+   if(typeof change.id!=='string'||!change.id||['constructor','prototype','__proto__'].includes(change.id))throw new Error('连接 ID 无效');
+   let old=index.data.profiles.find(p=>p.id===change.id),id=change.id;
+   const stale=(old?profileEtag(old):null)!==(change.baseEtag??null);
+   if(change.deleted){if(stale){conflicts.push('profiles:'+id);continue;}index.data.profiles=index.data.profiles.filter(p=>p.id!==id);delete index.data.keys[id];continue;}
+   let profile={...change.profile,id,mode:'proxy'};delete profile._etag;delete profile.hasKey;delete profile.apiKey;
+   validateWorkspace({profiles:[profile]});
+   const previousKey=old?(index.data.keys[id]??index.data.keys[old.baseUrl]??''):'';
+   let key=Object.hasOwn(change,'apiKey')?change.apiKey:previousKey;validateWorkspace({keys:{[id]:key}});
+   if(stale&&(!old||JSON.stringify(publicProfile(profile,{}))!==JSON.stringify(publicProfile(old,{}))||key!==previousKey)){id=randomUUID();remaps.profiles[change.id]=id;profile={...profile,id,name:profile.name+(old?'（冲突副本）':'（恢复副本）')};conflicts.push('profiles:'+change.id);old=null;}
+   index.data.profiles=old?index.data.profiles.map(p=>p.id===id?profile:p):[...index.data.profiles,profile];
+   index.data.keys[id]=key;
+  }
+  if(changes.clearKeys===true)index.data.keys={};
   const deletedProjects=new Set();
   for(const change of changes.projects||[]){const old=index.data.projects.find(p=>p.id===change.id);
    if(change.deleted){if(old){deletedProjects.add(old.id);removals.add(old.path);index.data.projects=index.data.projects.filter(p=>p.id!==old.id);}continue;}
@@ -117,23 +141,31 @@ export function createWorkspaceStore(filePath){
    index.data.chats=old?index.data.chats.map(c=>c.id===ref.id?ref:c):[ref,...index.data.chats];writes.set(ref.path,chat);etags[chat.id]=ref._etag;
   };
   for(const change of changes.chats||[]){const old=index.data.chats.find(c=>c.id===change.id);
-   if(change.deleted){if(old){removals.add(old.path);index.data.chats=index.data.chats.filter(c=>c.id!==change.id);}continue;}
+   const stale=(old?._etag??null)!==(change.baseEtag??null);
+   if(change.deleted){if(stale){conflicts.push('chats:'+change.id);continue;}if(old){removals.add(old.path);index.data.chats=index.data.chats.filter(c=>c.id!==change.id);}continue;}
    let chat;if(change.chat){chat=change.chat;if(chat.id!==change.id)throw new Error('对话数据格式无效');}
    else{if(!old)throw new Error('对话不存在');chat={...(await read(target(old.path))),...Object.fromEntries(['projectId','title'].filter(k=>Object.hasOwn(change,k)).map(k=>[k,change[k]]))};}
-   if(deletedProjects.has(chat.projectId))chat={...chat,projectId:''};saveChat(chat);
+   if(stale&&(!old||etag(chat)!==old._etag)){const id=randomUUID();remaps.chats[change.id]=id;chat={...chat,id,title:chat.title+(old?'（冲突副本）':'（恢复副本）')};conflicts.push('chats:'+change.id);}
+   if(chat.projectId&&!index.data.projects.some(p=>p.id===chat.projectId))chat={...chat,projectId:''};saveChat(chat);
   }
   for(const move of changes.moves||[]){if(typeof move.from!=='string'||typeof move.to!=='string')throw new Error('项目数据格式无效');if(move.to&&!index.data.projects.some(p=>p.id===move.to))throw new Error('对话所属项目不存在');
    for(const ref of [...index.data.chats])if(move.from==='*'||(ref.projectId||'')===move.from){const chat=writes.get(ref.path)||await read(target(ref.path));saveChat({...chat,projectId:move.to});}
   }
   for(const ref of [...index.data.chats])if(deletedProjects.has(ref.projectId)){const chat=writes.get(ref.path)||await read(target(ref.path));saveChat({...chat,projectId:''});}
+  if(settings.profile?.id&&remaps.profiles[settings.profile.id])settings.profile={...settings.profile,id:remaps.profiles[settings.profile.id]};
+  if(settings.active&&remaps.chats[settings.active])settings.active=remaps.chats[settings.active];
+  if(remaps.chats[index.data.active])index.data.active=remaps.chats[index.data.active];
+  if(remaps.profiles[index.data.profile?.id])index.data.profile={...index.data.profile,id:remaps.profiles[index.data.profile.id]};
   Object.assign(index.data,settings);index.revision++;index.updatedAt=new Date().toISOString();index.catalogVersion=1;
   for(const path of writes.keys())removals.delete(path);
   const journal={version:1,index,writes:[...writes].map(([path,value])=>({path,value})),removals:[...removals]};await atomicWrite(journalPath,journal);await finish(journal);
-  return {record:page(index),etags,projectEtags};
+  return {record:withProfileEtags(page(index)),etags,projectEtags,remaps,conflicts};
  };
- return {get:()=>enqueue(load),getSidebar:options=>enqueue(async()=>page(await loadIndex(),options)),getChat:id=>enqueue(async()=>getChatFrom(await loadIndex(),id)),patch:changes=>enqueue(()=>patch(changes)),update:(revision,data)=>enqueue(async()=>{
+ const withProfileEtags=record=>({...record,data:{...record.data,profiles:(record.data.profiles||[]).map(p=>({...p,_etag:etag({...publicProfile(p,record.data.keys),hasKey:undefined,secret:record.data.keys?.[p.id]??record.data.keys?.[p.baseUrl]??''})}))}});
+ return {get:()=>enqueue(load),revision:()=>enqueue(async()=>(await loadIndex()).revision),keyFor:(base,id)=>enqueue(async()=>{const {data}=await loadIndex();const p=matchingProfile(data.profiles||[],base,id);return p?(data.keys?.[p.id]??data.keys?.[p.baseUrl]??''):'';}),getSidebar:options=>enqueue(async()=>withProfileEtags(page(await loadIndex(),options))),getChat:id=>enqueue(async()=>getChatFrom(await loadIndex(),id)),patch:changes=>enqueue(()=>patch(changes)),update:(revision,data)=>enqueue(async()=>{
   if(!Number.isSafeInteger(revision)||revision<0)throw new Error('工作空间版本无效');
   const clean=validateWorkspace(data),previous=await load();if(revision!==previous.revision)return {conflict:true,record:previous};
+  if(!Object.hasOwn(clean,'keys')&&previous.data.keys)clean.keys=previous.data.keys;
   clean.projects=(clean.projects||[]).map(p=>({...p,path:projectPath(p.id)}));clean.chats=clean.chats||[];
   const record={version:2,revision:previous.revision+1,data:clean,updatedAt:new Date().toISOString()};await commit(previous,record);return {record};
  })};

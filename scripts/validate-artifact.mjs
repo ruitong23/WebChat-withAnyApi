@@ -5,10 +5,10 @@ import {fileURLToPath} from 'node:url';
 const root=new URL('../dist/',import.meta.url);
 const manifest=JSON.parse(await readFile(new URL('package.json',root),'utf8'));
 assert.equal(manifest.scripts.start,'node server/index.mjs');
-for(const path of ['server/index.mjs','server/relay.js','server/shared-store.mjs','server/workspace-store.mjs','public/app.js','public/i18n.js','public/response-utils.js','public/workspace-client.js']){
+for(const path of ['server/index.mjs','server/relay.js','server/shared-store.mjs','server/workspace-store.mjs','server/workspace-compat.mjs','public/app.js','public/i18n.js','public/response-utils.js','public/workspace-client.js']){
  const file=fileURLToPath(new URL(path,root));await access(file);execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
-for(const path of ['public/index.html','public/style.css','deploy/nginx.conf','deploy/lumen.service','README.md'])await access(new URL(path,root));
+for(const path of ['public/index.html','public/style.css','deploy/nginx.conf','deploy/lumen.service','README.md','UPGRADE.md'])await access(new URL(path,root));
 const server=await readFile(new URL('server/index.mjs',root),'utf8');
 assert(server.includes("root=new URL('../public/',import.meta.url)"));
 assert(!server.includes("from '../src/"));

@@ -9,6 +9,7 @@
     "test:server": "node tests/server.browser.mjs",
     "test:projects": "node tests/projects.browser.mjs",
     "test:paging": "node tests/paging.browser.mjs",
+    "test:upgrade": "node tests/upgrade.browser.mjs",
     "test:scroll": "node tests/scroll.browser.mjs",
     "validate": "node scripts/validate-artifact.mjs"
   }

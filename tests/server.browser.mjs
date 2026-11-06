@@ -34,13 +34,13 @@ const proxy=http.createServer(async(req,res)=>{
  const assets=new Set(['index.html','app.js','i18n.js','response-utils.js','workspace-client.js','style.css']);
  const path=req.url==='/'?'index.html':req.url.slice(1);
  if(!assets.has(path)){res.writeHead(404);res.end();return;}
- try{const data=await readFile(new URL('../dist/public/'+path,import.meta.url));res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');res.end(data);}catch{res.writeHead(404);res.end();}
+ try{const data=await readFile(new URL('../src/'+path,import.meta.url));res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');res.end(data);}catch{res.writeHead(404);res.end();}
 });
 await new Promise(r=>proxy.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${proxy.address().port}`;
 const wait=async(check,label)=>{for(let i=0;i<150;i++){if(await check())return;await new Promise(r=>setTimeout(r,40));}throw new Error('Timeout: '+label+'\n'+output);};
 const record=async()=>{const response=await fetch(url+'/api/workspace');assert.equal(response.status,200);return response.json();};
 const start=async()=>{
- server=spawn(process.execPath,['dist/server/index.mjs'],{cwd:root,env:{...process.env,PORT:String(port),LUMEN_HOST:'127.0.0.1',LUMEN_DATA_DIR:temporary},windowsHide:true,stdio:'pipe'});
+ server=spawn(process.execPath,['scripts/dev.mjs'],{cwd:root,env:{...process.env,PORT:String(port),LUMEN_HOST:'127.0.0.1',LUMEN_DATA_DIR:temporary},windowsHide:true,stdio:'pipe'});
  server.stdout.on('data',b=>output+=b);server.stderr.on('data',b=>output+=b);
  await wait(async()=>{try{return (await fetch(backend+'/health')).ok;}catch{return false;}},'server startup');
 };
@@ -52,7 +52,7 @@ try{
  await page.goto(url);await page.locator('.welcome h1').waitFor();
  await page.locator('[data-page="connection"]').first().click();await page.locator('#base-url').fill(base);await page.locator('#api-key').fill('server-test-key');
  assert(await page.locator('#remember-key').isChecked());await page.locator('[data-action="save-connection"]').click();
- await wait(async()=>(await record()).data.keys?.[base]==='server-test-key','server key save');
+ await wait(async()=>(await record()).data.profiles?.some(p=>p.hasKey),'server key save');assert.equal((await record()).data.keys,undefined);
  await page.locator('[data-action="discover"]').click();await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('API 已连接'));
  await page.locator('[data-page="chat"]').first().click();
  const chooser=page.waitForEvent('filechooser');await page.locator('[data-action="attach"]').click();await (await chooser).setFiles({name:'note.txt',mimeType:'text/plain',buffer:Buffer.from('需要保留在服务器的附件内容')});
@@ -91,7 +91,7 @@ try{
  await wait(async()=>(await record()).data.chats.filter(c=>c.id==='legacy-chat').length===1,'idempotent legacy import');
  console.log('PASS explicit browser migration preserves server chats and does not duplicate IDs');
  await context.close();await stop();await start();
- const restored=await record();assert(restored.data.chats.some(c=>c.id===active.id));assert.equal(restored.data.keys[base],'server-test-key');
+ const restored=await record();assert(restored.data.chats.some(c=>c.id===active.id));assert(restored.data.profiles.some(p=>p.hasKey));assert.equal(restored.data.keys,undefined);assert(Object.values(JSON.parse(await readFile(join(temporary,'workspace.json'),'utf8')).data.keys).includes('server-test-key'));
  const restartContext=await browser.newContext({locale:'en-US'}),restartPage=await restartContext.newPage();restartPage.on('pageerror',e=>errors.push(e.message));
  await restartPage.goto(url);await restartPage.locator('#msg-legacy-user').waitFor();assert.match(await restartPage.locator('#storage-status').textContent(),/Saved on server/);await restartContext.close();
  console.log('PASS service restart restores chats and keys from the same data directory');

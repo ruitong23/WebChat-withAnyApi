@@ -5,6 +5,8 @@ import {fileURLToPath} from 'node:url';
 import {join,resolve,sep} from 'node:path';
 import {createWorkspaceStore,validateWorkspace,conversationPath,projectPath} from '../src/workspace-store.mjs';
 import {mergeWorkspace,createWorkspacePersistence} from '../src/workspace-client.js';
+import {publicRecord} from '../src/workspace-compat.mjs';
+import {DatabaseSync} from 'node:sqlite';
 
 const fixtureRoot=fileURLToPath(new URL('../work/workspace-tests/',import.meta.url));await mkdir(fixtureRoot,{recursive:true});
 const removeFixture=async directory=>{const full=resolve(directory);assert(full.startsWith(resolve(fixtureRoot)+sep));await rm(full,{recursive:true,force:true});};
@@ -126,7 +128,6 @@ test('sidebar pages share one limit across folders and do not read conversation 
   assert(!(await store.patch({settings})).conflict);result=await createWorkspaceStore(path).getSidebar();assert.equal(result.listing.limit,30);assert.deepEqual(result.listing.expandedProjects,['p','q']);assert.equal(result.data.sidebar.scrollTop,123);
   const selected=await store.getChat('c0');assert.equal(selected.chat.messages[0].content,'c0');
   const updated={...selected.chat,title:'Edited alone'};await store.patch({chats:[{id:'c0',baseEtag:selected._etag,chat:updated}]});
-  assert.equal((await store.getChat('c0')).chat.title,'Edited alone');assert((await store.patch({chats:[{id:'c0',baseEtag:selected._etag,chat:selected.chat}]})).conflict);
   const meta=(await store.getSidebar({expandedProjects:['p'],limit:15})).data.chats.find(c=>c.id==='c0');
   await store.patch({chats:[{id:'c0',baseEtag:meta._etag,projectId:'q'}]});assert.equal((await store.getChat('c0')).chat.projectId,'q');
   await assert.rejects(readFile(join(dir,conversationPath(chats[0]))),{code:'ENOENT'});
@@ -149,4 +150,87 @@ test('a coalesced no-op save still publishes the acknowledged sidebar counts',as
  local.chats[0].title='new title';client.save();const first=client.flush();client.save();
  release(Response.json({record:{...initial,listing:{total:2}},etags:{a:'new'}}));assert(await first);assert.deepEqual(states,[[2,false]]);
  assert(await client.flush());assert.deepEqual(states,[[2,false],[2,true]]);assert.equal(client.dirty,false);
+});
+
+test('legacy SQLite migrates a consistent WAL snapshot once and keeps same-URL profile keys separate',async()=>{
+ const dir=await mkdtemp(join(fixtureRoot,'sqlite-')),path=join(dir,'workspace.sqlite');
+ const db=new DatabaseSync(path);
+ try{
+  db.exec("PRAGMA journal_mode=WAL; CREATE TABLE items(kind TEXT,id TEXT,revision INTEGER,value TEXT,updated INTEGER,PRIMARY KEY(kind,id)); CREATE TABLE meta(key TEXT PRIMARY KEY,value INTEGER); INSERT INTO meta VALUES('revision',42);");
+  const insert=db.prepare('INSERT INTO items VALUES(?,?,?,?,?)');
+  insert.run('chat','old',2,JSON.stringify(chat('old')),1);
+  for(const id of ['one','two'])insert.run('profile',id,3,JSON.stringify({id,name:id,baseUrl:'https://same.test',nativeUrl:'https://manage.test',apiKey:'test-key-'+id}),2);
+  const store=createWorkspaceStore(path),record=await store.getSidebar(),response=publicRecord(record);
+  assert.equal(record.revision,42);assert.equal((await store.getChat('old')).chat.messages[0].content,'old');
+  assert.equal(response.data.profiles.length,2);assert(response.data.profiles.every(p=>p.hasKey&&p._etag));assert(!JSON.stringify(response).includes('test-key-'));assert.equal(response.data.keys,undefined);
+  assert.equal(await store.keyFor('https://same.test/v1','one'),'test-key-one');assert.equal(await store.keyFor('https://same.test','two'),'test-key-two');
+  assert.equal(await store.keyFor('https://manage.test','one'),'test-key-one');assert.equal(await store.keyFor('https://other.test','one'),'');
+  const second=response.data.profiles.find(p=>p.id==='two');
+  await store.patch({profiles:[{id:'two',baseEtag:second._etag,profile:{...second,name:'Edited without key'}}]});
+  assert.equal(await store.keyFor('https://same.test','two'),'test-key-two');
+  db.prepare('UPDATE items SET value=? WHERE id=?').run(JSON.stringify(chat('old','SQLite changed after migration')),'old');
+  assert.equal((await createWorkspaceStore(path).getChat('old')).chat.messages[0].content,'old','Migration is not repeated after the JSON index exists');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM items').get().n,3,'Original database remains intact');
+  const disk=JSON.parse(await readFile(path+'.json','utf8'));assert.equal(disk.migratedFrom,'sqlite');assert.equal(disk.data.keys.two,'test-key-two');
+  await store.patch({clearKeys:true});assert.equal(await store.keyFor('https://same.test','one'),'');assert(publicRecord(await store.getSidebar()).data.profiles.every(p=>!p.hasKey));
+ }finally{db.close();await removeFixture(dir);}
+});
+
+test('concurrent chat edits and edit-after-delete save independent conflict and recovery copies',async()=>{
+ const dir=await mkdtemp(join(fixtureRoot,'copies-')),store=createWorkspaceStore(join(dir,'workspace.json'));
+ try{
+  await store.update(0,{chats:[chat('a')],active:'a'});const original=await store.getChat('a');
+  await store.patch({chats:[{id:'a',baseEtag:original._etag,chat:chat('a','remote')}]});
+  const retry=await store.patch({chats:[{id:'a',baseEtag:original._etag,chat:chat('a','remote')}]});assert.deepEqual(retry.remaps.chats,{},'Retrying an acknowledged-lost identical write must not create a conflict copy');
+  const result=await store.patch({chats:[{id:'a',baseEtag:original._etag,chat:chat('a','local')}]});
+  const copy=result.remaps.chats.a;assert(copy);assert.equal((await store.getChat('a')).chat.messages[0].content,'remote');assert.equal((await store.getChat(copy)).chat.messages[0].content,'local');assert.match((await store.getChat(copy)).chat.title,/冲突副本/);assert.equal(result.record.activeId,copy);
+  const deletion=await store.getChat('a');await store.patch({chats:[{id:'a',baseEtag:deletion._etag,deleted:true}]});
+  const recovered=await store.patch({chats:[{id:'a',baseEtag:deletion._etag,chat:chat('a','offline edit')}]});
+  assert.match((await store.getChat(recovered.remaps.chats.a)).chat.title,/恢复副本/);assert.equal((await store.getSidebar()).listing.total,2);
+ }finally{await removeFixture(dir);}
+});
+
+test('partial client consumes conflict remaps and continues saving an in-flight stream to its copy',async t=>{
+ const initial={partial:true,revision:1,data:{chats:[{...chat('a'),_etag:'old'}],projects:[],profiles:[],active:'a'}};
+ let local=structuredClone(initial.data),release,calls=0;
+ t.mock.method(globalThis,'fetch',async(_url,options)=>{
+  calls++;const changes=JSON.parse(options.body).changes;
+  if(calls===1)return new Promise(resolve=>{release=()=>resolve(Response.json({record:{...initial,revision:2,data:{...initial.data,chats:[{id:'copy',title:'a（冲突副本）',_etag:'new'}]}},remaps:{chats:{a:'copy'}},etags:{copy:'new'}}));});
+  assert.equal(changes.chats[0].id,'copy');assert.equal(changes.chats[0].baseEtag,'new');assert.equal(changes.chats[0].chat.messages[0].content,'more stream');
+  return Response.json({record:{...initial,revision:3},etags:{copy:'next'}});
+ });
+ const client=createWorkspacePersistence({initial,read:()=>structuredClone(local),onSaved:(_record,{remaps})=>{if(remaps?.chats.a){local.chats[0].id='copy';local.chats[0].title='a（冲突副本）';local.active='copy';}}});
+ local.chats[0].messages[0].content='first frame';client.save();const first=client.flush();local.chats[0].messages[0].content='more stream';client.save();release();assert(await first);assert(client.dirty);assert(await client.flush());assert(!client.dirty);
+});
+
+test('profile conflicts preserve both credentials and stale deletion cannot remove a newer connection',async()=>{
+ const dir=await mkdtemp(join(fixtureRoot,'profile-copies-')),store=createWorkspaceStore(join(dir,'workspace.json'));
+ try{
+  const profile={id:'p',name:'Original',baseUrl:'https://same.test',mode:'proxy',remember:true};
+  await store.patch({profiles:[{id:'p',profile,apiKey:'test-original'}]});const before=publicRecord(await store.getSidebar()).data.profiles[0];
+  await store.patch({profiles:[{id:'p',baseEtag:before._etag,profile:{...profile,name:'Remote'},apiKey:'test-remote'}]});
+  const result=await store.patch({profiles:[{id:'p',baseEtag:before._etag,profile:{...profile,name:'Local'},apiKey:'test-local'}]});
+  const copy=result.remaps.profiles.p;assert(copy);assert.equal(await store.keyFor(profile.baseUrl,'p'),'test-remote');assert.equal(await store.keyFor(profile.baseUrl,copy),'test-local');
+  await store.patch({profiles:[{id:'p',baseEtag:before._etag,deleted:true}]});assert.equal((await store.getSidebar()).data.profiles.length,2);
+  assert(!JSON.stringify(publicRecord(result.record)).includes('test-local'));
+ }finally{await removeFixture(dir);}
+});
+
+test('a pending local save never turns an unseen remote connection addition into a deletion',async t=>{
+ const initial={partial:true,revision:1,data:{chats:[{...chat('a'),_etag:'old'}],projects:[],profiles:[]}};
+ let local=structuredClone(initial.data),release,calls=0;
+ t.mock.method(globalThis,'fetch',async(_url,options)=>{
+  calls++;const changes=JSON.parse(options.body).changes;
+  if(calls===1)return new Promise(resolve=>{release=()=>resolve(Response.json({record:{...initial,revision:2,data:{...initial.data,profiles:[{id:'remote',name:'Remote',baseUrl:'https://api.test',_etag:'remote'}]}},etags:{a:'new'}}));});
+  assert.deepEqual(changes.profiles,[]);
+  return Response.json({record:{...initial,revision:3},etags:{a:'next'}});
+ });
+ const client=createWorkspacePersistence({initial,read:()=>structuredClone(local)});
+ local.chats[0].title='first';client.save();const first=client.flush();local.chats[0].title='second';client.save();release();assert(await first);assert(await client.flush());
+});
+
+test('an unreadable SQLite database fails without creating an empty JSON replacement',async()=>{
+ const dir=await mkdtemp(join(fixtureRoot,'sqlite-damaged-')),path=join(dir,'workspace.sqlite');
+ try{await writeFile(path,'damaged database');await assert.rejects(createWorkspaceStore(path).get());assert.equal(await readFile(path,'utf8'),'damaged database');await assert.rejects(readFile(path+'.json'),{code:'ENOENT'});}
+ finally{await removeFixture(dir);}
 });

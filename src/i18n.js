@@ -1,6 +1,10 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '已保存在服务器，留空保持不变':'Saved on server; leave blank to keep',
+  '其他设备已有修改，已保留冲突副本':'Changes from another device were preserved; a conflict copy was saved',
+  '连接尚未保存，请先重试保存':'Connection is not saved. Retry saving first.',
+  '对话尚未保存，请先重试保存':'Conversation is not saved. Retry saving first.',
   '目录加载设置无效':'Invalid folder loading settings',
   '加载更多后显示':'Load more to show these chats',
   '加载更多':'Load more',
