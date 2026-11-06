@@ -21,7 +21,7 @@ On other platforms, run:
 node scripts/dev.mjs
 ```
 
-Then open the address shown in the terminal.
+Then open the address shown in the terminal. A fresh installation creates its own workspace in `data/`; no existing server, account, domain, or external database is required. For a different port or data directory, set `PORT` or `LUMEN_DATA_DIR` in the process environment. See the [deployment guide](deploy/README.md) for all configuration variables and reverse-proxy setup.
 
 ## API compatibility
 
@@ -71,7 +71,7 @@ The browser keeps the current UI state in memory and does not write new chats or
 
 Different browsers visiting the same server use the same workspace. This version has no login or per-user separation. Saved keys are plain text in the server data file. Requests send content and credentials to the configured API; proxy mode also passes them through this server. Exported conversation backups do not include API keys.
 
-For a Git-managed server, run `node scripts/dev.mjs` from the clone and proxy the site to Node. Future updates use `git pull --ff-only origin main` followed by a service restart; no build or archive is required. Keep the existing service environment and persistent data directory when updating. A standalone `dist/` build remains optional; see [the deployment guide](deploy/README.md) and [Nginx configuration](deploy/nginx.conf).
+For a Git-managed server, run `npm start` from the clone and proxy the site to Node. The generic systemd and Nginx examples use `/opt/lumen`, `/var/lib/lumen`, port `4177`, and service name `lumen`; adapt them to your environment. Keep machine-specific settings outside the checkout. Future updates use `git pull --ff-only origin main` followed by a restart of your service; Git does not restart the application automatically. No build or archive is required, and the persistent data directory is retained across updates. A standalone `dist/` build remains optional; see [the deployment guide](deploy/README.md) and [Nginx configuration](deploy/nginx.conf).
 
 Set LUMEN_DATA_DIR to select a persistent server data directory; its default is the project's data/ directory. Keep and back up this directory across updates and restarts. Run one Node instance against it. Changed conversation/project files are written atomically with revision checks and a recovery journal. Concurrent chat/connection edits save conflict copies, and edits after remote deletion save recovery copies. Idle pages poll revisions every three seconds without loading all messages, preserving drafts and the local view. Model requests wait for the question to be saved; final output is flushed and unsaved changes trigger the browser's leave-page prompt. Total workspace save size is limited to 128 MiB; streaming output is saved periodically, and saving failures remain visible with retry support.
 

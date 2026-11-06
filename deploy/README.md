@@ -6,72 +6,81 @@
 
 仅上传 HTML/JS/CSS 到 Nginx 静态目录不能保存服务器文件。需要同时启动下方 Node 服务，并将同一域名的 `/api/` 请求转发给它。Node.js 20.3 或更高版本即可，无需安装 npm 依赖。
 
-## 构建并上传
+## 从 Git 仓库部署
 
-在源码目录运行：
-
-```sh
-npm run build
-npm run validate
-```
-
-将 `dist/` 的全部内容上传到服务器，例如 `/opt/lumen/`。目录结构为：
-
-```text
-/opt/lumen/
-  public/           Nginx 对外提供的网页文件
-  server/           Node 服务与磁盘存储代码
-  deploy/           Nginx 与 systemd 配置示例
-  package.json
-```
-
-## 启动服务
-
-首次可以在服务器终端验证：
+以下示例适用于使用 systemd 的 Debian/Ubuntu。`/opt/lumen`、`/var/lib/lumen`、服务名 `lumen` 和系统用户 `www-data` 都是示例值，可以按自己的环境修改。Node.js 需要能由 `/usr/bin/node` 运行；如果安装位置不同，修改服务文件中的 `ExecStart`。
 
 ```sh
+sudo git clone https://github.com/ruitong23/WebChat-withAnyApi.git /opt/lumen
 cd /opt/lumen
-LUMEN_HOST=127.0.0.1 LUMEN_DATA_DIR=/var/lib/lumen node server/index.mjs
-```
-
-先创建 `/var/lib/lumen`，并让运行 Node 的系统用户拥有写权限。也可设置 `LUMEN_DATA_DIR=/你已有的网站目录/私有数据目录`，但不要放入 Nginx 的 `public/` 根目录。默认不设置时保存在部署目录的 `data/`。
-
-长期运行时，将 `deploy/lumen.service` 中的路径、Node 可执行文件位置、系统用户改为实际值，再安装服务：
-
-```sh
 sudo cp deploy/lumen.service /etc/systemd/system/lumen.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now lumen
 sudo systemctl status lumen
 ```
 
-示例使用 Debian/Ubuntu 常见的 `www-data` 用户。systemd 的 `StateDirectory=lumen` 会创建数据目录并赋予服务用户权限。
+服务直接运行仓库中的 `scripts/dev.mjs`，不需要构建或安装 npm 依赖。示例监听 `127.0.0.1:4177`，由 Nginx 提供外部访问；systemd 会创建 `/var/lib/lumen` 并赋予服务用户写权限。已有的服务也可以使用，只需配置正确的启动命令和持久数据目录。
+
+## 本机配置
+
+服务器上的配置放在 Git 仓库之外。示例服务可选读取 `/etc/lumen/lumen.env`，不存在这个文件时使用服务文件中的默认值。文件格式是每行 `变量=值`，例如：
+
+```ini
+PORT=4177
+LUMEN_HOST=127.0.0.1
+LUMEN_DATA_DIR=/var/lib/lumen
+LUMEN_PUBLIC_ORIGIN=https://chat.example.com
+LUMEN_ALLOW_PRIVATE=false
+```
+
+将域名改成自己的实际域名；本机或局域网使用时可省略 `LUMEN_PUBLIC_ORIGIN`。配置目录和文件需要由管理员自行创建，修改配置后重启自己的服务。
+
+| 环境变量 | 用途 | 默认值 |
+| --- | --- | --- |
+| `PORT` | Node 监听端口 | `4177` |
+| `LUMEN_HOST` | 监听地址；仅本机用 `127.0.0.1`，局域网用 `0.0.0.0` | `0.0.0.0`；示例服务覆盖为 `127.0.0.1` |
+| `LUMEN_DATA_DIR` | 持久数据目录 | 应用目录下的 `data/`；示例服务覆盖为 `/var/lib/lumen` |
+| `LUMEN_WORKSPACE_FILE` | 单独指定 JSON 工作空间索引；对话和项目保存在它的同级目录 | 数据目录中的 `workspace.json` |
+| `LUMEN_CONFIG_FILE` | 单独指定模型配置 JSON | 数据目录中的 `model-configs.json` |
+| `LUMEN_PUBLIC_ORIGIN` | 浏览器访问的来源，包含协议、域名和可选端口，不带路径 | 根据请求推断 |
+| `LUMEN_ALLOW_PRIVATE` | 设为 `false` 禁止向 localhost/内网地址转发；连接本机或内网模型时设为 `true` | 允许内网 |
+
+数据目录必须允许运行 Node 的系统用户写入。不要把它放进公开的静态文件目录。`npm start` 不会自动读取 `.env`；直接运行时请通过终端环境或进程管理器设置这些变量。
 
 ## 配置 Nginx
 
-使用 `deploy/nginx.conf`，修改域名和 `root` 后加入现有 Nginx 配置。如果已有网站，只需将其中的 `location /api/` 加入该域名的 `server` 配置，并把新的 `public/` 文件放到原静态目录。保留 `proxy_set_header Host $http_host`；关闭响应缓冲以保持流式输出。
+`deploy/nginx.conf` 是通用反向代理示例：将 `example.com` 改成自己的域名，并让代理端口与 `PORT` 一致。整个网站都转发给 Node，由 Node 提供网页和 API；不需要设置静态 `root`。关闭代理缓冲以保持流式输出。
+
+将配置加入自己的 Nginx 站点后检查并重载：
 
 ```sh
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-前端和 `/api/` 必须位于同一个域名。已有 HTTPS 配置可继续使用。此示例按域名根路径部署。
+前端和 API 使用同一个域名，示例按域名根路径部署。可以沿用已有 HTTPS 和登录设置，也可以自行在 Nginx 添加。示例文件本身只提供 HTTP 转发。
 
-Nginx 配置依据：[代理模块](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)、[HTTP 核心模块](https://nginx.org/en/docs/http/ngx_http_core_module.html)。
+## 更新与备份
 
-## 数据与升级
-
-直接运行仓库的服务器在更新前等待生成和保存结束，然后执行：
+使用与首次安装相同的代码目录及服务名，例如：
 
 ```sh
-cd /opt/WebChat-withAnyApi
-git pull --ff-only origin main && sudo systemctl restart lumen-webchat
+cd /opt/lumen
+sudo git pull --ff-only origin main
+sudo systemctl restart lumen
 ```
 
-将路径及服务名换成实际值。systemd 启动命令应为仓库中的 `node scripts/dev.mjs`；Nginx 可将整个网站代理到 Node。保留已有 HTTPS、登录和代理设置即可。不要在服务器上直接修改受 Git 管理的源码，本机配置放在 systemd 环境变量中，数据目录放在 `/var/lib/` 等持久位置。
+拉取成功后再重启，新的后端才会生效。`git pull` 本身不会自动重启进程；自动重启由各安装环境的进程管理器或本机 Git 钩子配置。仓库不包含特定服务器的钩子、登录配置或迁移脚本。
 
-支持 `LUMEN_WORKSPACE_FILE` 指定 JSON 索引路径、`LUMEN_CONFIG_FILE` 指定模型配置路径，或使用 `LUMEN_DATA_DIR` 指定统一数据目录。`LUMEN_PUBLIC_ORIGIN` 可指定浏览器访问的完整来源，如 `https://chat.example.com`；`LUMEN_ALLOW_PRIVATE=false` 禁止向 localhost/内网地址转发，连接本机或内网模型时可以设为 `true`。未设置时允许内网，以兼容本地模型。
+更新前等待生成和保存结束。保持 Git 工作区源码干净，本机配置留在 `/etc/` 或进程管理器中，运行数据放在持久目录。更新代码时保留数据目录；备份时先停止服务，再完整备份数据目录，完成后重新启动。
+
+## 可选：独立目录部署
+
+如果需要脱离 Git 仓库运行，可以手动执行 `npm run build` 和 `npm run validate`，将生成的 `dist/` 内容复制到自己的应用目录。其启动命令为 `node server/index.mjs`，生成的 `dist/deploy/lumen.service` 也使用这个入口。Nginx 仍可将整个网站转发到 Node。
+
+这种方式的更新需要替换应用代码后重启服务；持久数据目录保持不变。直接运行 Git 仓库的部署不需要这个步骤。
+
+## 数据结构与保存行为
 
 每个项目和每条对话分别保存，目录结构为：
 
@@ -99,7 +108,6 @@ data/
 - 页面空闲时每 3 秒检查版本变化，只读取目录和当前对话；没有变化返回 304，不拉取所有正文。生成、编辑连接、拖动、弹窗和未保存时暂停接收远端状态，保留当前草稿和视图位置。
 - 请求模型前先确认问题已保存，生成结束再次确认保存；离开页面时有未保存数据会触发浏览器确认提示。
 - 流式输出期间也会定期保存已接收内容。离开页面前等待“已保存到服务器”；网络中断或关闭浏览器后的后续模型输出不会继续生成。
-- 更新时替换 `public/`、`server/`，再运行 `sudo systemctl restart lumen`。保留并备份数据目录；不要用空目录覆盖已有数据。服务器重启后会从磁盘恢复。
 - 单个工作空间保存请求上限为 128 MiB，单次模型转发请求仍为 24 MiB。运行一个 Node 实例，不要用多进程同时写同一个数据目录。
 
 验证方法：电脑 A 创建对话并等待保存，再用另一浏览器或手机访问同一域名；应看到同样的记录和已保存连接。重启 Node 服务后再次验证。
@@ -110,4 +118,4 @@ data/
 - 列表底部“加载更多”每次增加 15 条，滚动不会自动请求更多。展开目录、已加载数量、搜索、侧栏滚动位置和当前对话都写入 workspace.json 的视图设置，刷新后自动恢复。
 - 正文通过单条对话接口读取，普通保存采用增量接口，只提交变更内容；未加载的对话不会被当作删除。只在批量移动、导出全部等明确操作时访问完整范围。首次升级旧目录会一次性补齐索引中的标题和校验值，后续无需读取全部正文来展示侧栏。
 - 桌面可拖动侧栏对话或右侧对话标题进入项目，拖到“未分组”可移出。拖动会更新所属项目并移动服务器中的 JSON 文件；手机继续支持顶部的移动按钮。
-- 本次前后端接口一同更新，部署时同时替换 public/ 和 server/，然后重启 Node 服务，并保留原数据目录。
+- 前后端需要使用同一版本；更新后重启 Node 服务并刷新网页，保留原数据目录。

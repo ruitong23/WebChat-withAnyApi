@@ -10,7 +10,9 @@ const server=(await readFile(new URL('scripts/dev.mjs',root),'utf8'))
  .replace("root=new URL('../src/',import.meta.url)","root=new URL('../public/',import.meta.url)");
 await writeFile(new URL('dist/server/index.mjs',root),server);
 await writeFile(new URL('dist/package.json',root),JSON.stringify({name:'lumen-studio-server',private:true,type:'module',scripts:{start:'node server/index.mjs'}},null,2)+'\n');
-for(const name of ['nginx.conf','lumen.service'])await copyFile(new URL('deploy/'+name,root),new URL('dist/deploy/'+name,root));
+await copyFile(new URL('deploy/nginx.conf',root),new URL('dist/deploy/nginx.conf',root));
+const service=(await readFile(new URL('deploy/lumen.service',root),'utf8')).replace('scripts/dev.mjs','server/index.mjs');
+await writeFile(new URL('dist/deploy/lumen.service',root),service);
 await copyFile(new URL('deploy/README.md',root),new URL('dist/README.md',root));
 // Remove obsolete generated Worker files from earlier builds.
 for(const path of ['dist/server/index.js','dist/.openai/hosting.json'])await rm(new URL(path,root),{force:true});

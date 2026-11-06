@@ -12,4 +12,7 @@ for(const path of ['public/index.html','public/style.css','deploy/nginx.conf','d
 const server=await readFile(new URL('server/index.mjs',root),'utf8');
 assert(server.includes("root=new URL('../public/',import.meta.url)"));
 assert(!server.includes("from '../src/"));
+const service=await readFile(new URL('deploy/lumen.service',root),'utf8');
+assert(service.includes('/server/index.mjs'));
+assert(!service.includes('/scripts/dev.mjs'));
 console.log('Node deployment paths, JavaScript syntax, frontend, and Nginx files are valid.');

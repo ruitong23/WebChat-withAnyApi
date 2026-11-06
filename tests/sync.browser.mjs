@@ -86,7 +86,7 @@ try{
  await page.locator('[data-action="import-browser"]').click();await saved(page);await wait(async()=>(await record()).data.presets?.some(p=>p.name==='旧版小说预设'),'presets-only import');
  assert.equal(await page.evaluate(()=>localStorage.getItem('lumen.presets')),null);
  await context.close();await peerContext.close();
- console.log('PASS the old server browser can import presets even after lumen.v1 was already removed');
+ console.log('PASS legacy browser presets can be imported independently of lumen.v1');
 
  await stop();privateAllowed=false;await start();
  const response=await fetch(url+'/api/relay',{method:'POST',headers:{Origin:url,'Content-Type':'application/json'},body:JSON.stringify({baseUrl:base,profileId:'one',path:'/v1/models'})});assert.equal(response.status,400);

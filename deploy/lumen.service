@@ -7,12 +7,14 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/lumen
-ExecStart=/usr/bin/node /opt/lumen/server/index.mjs
+ExecStart=/usr/bin/node /opt/lumen/scripts/dev.mjs
 Environment=LUMEN_HOST=127.0.0.1
 Environment=PORT=4177
 Environment=LUMEN_DATA_DIR=/var/lib/lumen
+EnvironmentFile=-/etc/lumen/lumen.env
 StateDirectory=lumen
-StateDirectoryMode=0750
+StateDirectoryMode=0700
+UMask=0077
 Restart=on-failure
 RestartSec=3
 
