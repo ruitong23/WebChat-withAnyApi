@@ -1,8 +1,17 @@
-import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
-const root = new URL('../',import.meta.url);
-const [html,css,app,relay,responseUtils,i18n] = await Promise.all(['src/index.html','src/style.css','src/app.js','src/relay.js','src/response-utils.js','src/i18n.js'].map(p=>readFile(new URL(p,root),'utf8')));
-const assets=JSON.stringify({'/':{type:'text/html; charset=utf-8',body:html},'/index.html':{type:'text/html; charset=utf-8',body:html},'/style.css':{type:'text/css; charset=utf-8',body:css},'/app.js':{type:'text/javascript; charset=utf-8',body:app},'/response-utils.js':{type:'text/javascript; charset=utf-8',body:responseUtils},'/i18n.js':{type:'text/javascript; charset=utf-8',body:i18n}});
-const worker=`${relay.replace(/export /g,'')}\nconst assets=${assets};\nexport default { async fetch(request,env,ctx) { const url=new URL(request.url); if(url.pathname==='/api/relay') return relay(request); const asset=assets[url.pathname]; if(!asset)return new Response('Not found',{status:404}); return new Response(asset.body,{headers:{'Content-Type':asset.type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http: https:; object-src 'none'; base-uri 'self'; form-action 'self'"}}); } };\n`;
-await mkdir(new URL('dist/server/',root),{recursive:true});await mkdir(new URL('dist/.openai/',root),{recursive:true});await mkdir(new URL('worker/',root),{recursive:true});
-await writeFile(new URL('worker/index.js',root),worker);await writeFile(new URL('dist/server/index.js',root),worker);
-try{await copyFile(new URL('.openai/hosting.json',root),new URL('dist/.openai/hosting.json',root));}catch(error){if(error.code!=='ENOENT')throw error;await writeFile(new URL('dist/.openai/hosting.json',root),JSON.stringify({d1:null,r2:null},null,2));}console.log('Built self-contained Worker: '+worker.length+' characters');
+import {readFile,writeFile,mkdir,copyFile,rm} from 'node:fs/promises';
+const root=new URL('../',import.meta.url);
+const frontend=['index.html','style.css','app.js','i18n.js','response-utils.js','workspace-client.js'];
+const backend=['relay.js','shared-store.mjs','workspace-store.mjs'];
+for(const directory of ['dist/public/','dist/server/','dist/deploy/'])await mkdir(new URL(directory,root),{recursive:true});
+for(const name of frontend)await copyFile(new URL('src/'+name,root),new URL('dist/public/'+name,root));
+for(const name of backend)await copyFile(new URL('src/'+name,root),new URL('dist/server/'+name,root));
+const server=(await readFile(new URL('scripts/dev.mjs',root),'utf8'))
+ .replaceAll("from '../src/","from './")
+ .replace("root=new URL('../src/',import.meta.url)","root=new URL('../public/',import.meta.url)");
+await writeFile(new URL('dist/server/index.mjs',root),server);
+await writeFile(new URL('dist/package.json',root),JSON.stringify({name:'lumen-studio-server',private:true,type:'module',scripts:{start:'node server/index.mjs'}},null,2)+'\n');
+for(const name of ['nginx.conf','lumen.service'])await copyFile(new URL('deploy/'+name,root),new URL('dist/deploy/'+name,root));
+await copyFile(new URL('deploy/README.md',root),new URL('dist/README.md',root));
+// Remove obsolete generated Worker files from earlier builds.
+for(const path of ['dist/server/index.js','dist/.openai/hosting.json'])await rm(new URL(path,root),{force:true});
+console.log('Built Node deployment in dist/: public frontend, server storage, Nginx configuration.');

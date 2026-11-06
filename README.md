@@ -1,6 +1,6 @@
 # Lumen Studio
 
-A local web client for OpenAI-compatible chat APIs, with model discovery, configurable parameters, reasoning display, and LM Studio model management.
+A server-hosted web client for OpenAI-compatible chat APIs, with persistent conversations, model discovery, reasoning display, and LM Studio model management.
 
 The interface follows your browser's preferred language: Chinese for Chinese language settings, and English otherwise.
 
@@ -63,17 +63,21 @@ Some APIs reject `stream_options.include_usage`; disable **Include usage** for t
 - Parameter presets, system prompts, request previews, and per-model shared settings.
 - LM Studio model management when its native management API is available.
 
-## Data and privacy
+## Server storage and Nginx deployment
 
-- Chats, chat attachments, and connection profiles are stored in each browser's local storage.
-- API keys use session storage by default. **Remember key** uses local storage. Browser storage is not encrypted.
-- Requests send chat content, attachments, and the API key to the API URL you configure. Proxy mode also passes them through the machine running this application. The upstream service controls its own retention policy.
-- The application server does not persist chat bodies, chat attachments, or API keys. Shared model settings, including system prompts, API source URLs, model IDs, and parameters, are saved in `data/model-configs.json`.
-- Users of the same server and API/model combination can read and edit shared settings. There is currently no login or per-user access control.
-- The server listens on `0.0.0.0:4177` by default for LAN access. Set `LUMEN_HOST=127.0.0.1` for access from the same computer only. Set `PORT` to change the port.
-- `.gitignore` excludes runtime data, exports, environment files, private-key files, test output, and local deployment configuration. Browser data is not part of the repository.
+Each conversation is saved as its own JSON file. Ungrouped chats live in data/conversations/; projects have independent data/projects/<project-id>/project.json metadata and conversations/ directories. The workspace.json file stores the global index, connection profiles, saved API keys, and presets. Each project records its relative directory path, which stays stable after a rename. Model settings remain in data/model-configs.json. The sidebar initially fetches at most 15 conversation titles across all expanded project folders and Ungrouped combined; project names do not count toward this limit. Opening a folder prioritizes its entries in the shared budget. Load more adds 15 entries and runs only on click. Expanded folders, the loaded limit, search, sidebar scroll, and the active chat are saved on the server and restored on reload. Message bodies are fetched only when opening a chat, and only changed chats/settings are submitted on save. Desktop users can drag a chat entry or the right-hand chat title into a folder or back to Ungrouped; the move button also remains available.
 
-Use the Node server for the complete application. Static hosting alone does not provide the API proxy or shared-settings service.
+The browser keeps the current UI state in memory and does not write new chats or keys to localStorage/sessionStorage. Unchecking **Save key on server** keeps that key only in the current page's memory.
+
+Different browsers visiting the same server use the same workspace. This version has no login or per-user separation. Saved keys are plain text in the server data file. Requests send content and credentials to the configured API; proxy mode also passes them through this server. Exported conversation backups do not include API keys.
+
+For Nginx, build with npm run build, upload the complete dist/ directory, start node server/index.mjs from that directory, and proxy /api/ to the Node process. Serve only public/ as the static web root. Uploading static files alone cannot provide disk persistence. See [the deployment guide](deploy/README.md) and [Nginx configuration](deploy/nginx.conf).
+
+Set LUMEN_DATA_DIR to select a persistent server data directory; its default is the project's data/ directory. Keep and back up this directory across updates and restarts. Run one Node instance against it. Changed conversation/project files are written atomically with revision checks and a recovery journal, and conflicting edits to the same conversation are reported instead of silently overwritten. Total workspace save size is limited to 128 MiB; streaming output is saved periodically, and saving failures remain visible with retry support.
+
+Use **Settings → Data → Import legacy browser data** to copy this browser's old records to the server. Existing browser data is retained, and opening the new version never automatically replaces server records with old local records. Chat JSON import/export also preserves project membership. Earlier single-file server data is migrated automatically on first access, keeping workspace.json.v1.bak intact. Create a project with the current chat, every chat in the selected group, or an empty conversation; moving chats changes their disk location. Deleting a project moves its conversations to Ungrouped.
+
+The browser-only version is preserved on the [always-local-save branch](https://github.com/ruitong23/WebChat-withAnyApi/tree/always-local-save).
 
 ## Development
 
@@ -82,8 +86,8 @@ npm start
 npm test
 ```
 
-`src/` contains the frontend, relay, and shared-settings store. `scripts/dev.mjs` runs the local Node server. Optional browser checks require Playwright and Chrome.
+`src/` contains the frontend, relay, and shared-settings store. `scripts/dev.mjs` runs the local Node server. Optional browser checks require Playwright and Chrome. Run npm run test:server for cross-browser storage, service restart, and reverse-proxy checks; npm run test:scroll checks desktop and mobile scrolling. Run npm run test:projects for project creation, moving files, bulk grouping, backup round-trips, and mobile navigation. Run npm run test:paging for the shared 15-entry budget, lazy body loading, restored view state, incremental saves, and real drag-and-drop with 60 conversations.
 
-`npm run build` creates a Worker artifact in `dist/server/index.js`; `npm run validate` checks that artifact. The Worker artifact currently provides the frontend and relay, while the shared-settings API is implemented by the Node server.
+`npm run build` creates a self-contained Node deployment in `dist/`, including `public/`, `server/`, and Nginx/systemd examples. `npm run validate` checks its paths and JavaScript syntax. No npm dependencies are needed at runtime.
 
 This is an independent client and is not an official LM Studio product.

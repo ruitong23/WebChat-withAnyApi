@@ -22,7 +22,7 @@ const upstream=http.createServer(async(req,res)=>{
 await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
 const reserve=http.createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));
 const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
-const server=spawn(process.execPath,['scripts/dev.mjs'],{cwd:root,env:{...process.env,PORT:String(port),LUMEN_HOST:'127.0.0.1',LUMEN_CONFIG_FILE:fileURLToPath(new URL('model-configs.json',captures))},windowsHide:true,stdio:'pipe'});
+const server=spawn(process.execPath,['scripts/dev.mjs'],{cwd:root,env:{...process.env,PORT:String(port),LUMEN_HOST:'127.0.0.1',LUMEN_CONFIG_FILE:fileURLToPath(new URL('model-configs.json',captures)),LUMEN_WORKSPACE_FILE:fileURLToPath(new URL('workspace.json',captures))},windowsHide:true,stdio:'pipe'});
 let browser,output='';server.stdout.on('data',b=>output+=b);server.stderr.on('data',b=>output+=b);
 const url=`http://127.0.0.1:${port}`;
 const seed={parameterPolicyVersion:1,active:'history',profile:{name:'Scroll QA',baseUrl:`http://127.0.0.1:${upstream.address().port}`,mode:'proxy'},chats:[
@@ -46,7 +46,8 @@ try{
  for(const mobile of [false,true]){
   const label=mobile?'mobile':'desktop',errors=[];
   const context=await browser.newContext({locale:'zh-CN',viewport:mobile?{width:390,height:844}:{width:1440,height:1000},isMobile:mobile,hasTouch:mobile});
-  await context.addInitScript(seed=>{if(!localStorage.getItem('lumen.v1'))localStorage.setItem('lumen.v1',JSON.stringify(seed));},seed);
+  const existing=await (await fetch(url+'/api/workspace')).json();
+  const seeded=await fetch(url+'/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:existing.revision,data:seed})});assert.equal(seeded.status,200);
   const page=await context.newPage();page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('API 已连接'));
   assert(await lastQuestionVisible(page),'Opening history must align the last user question');
@@ -56,9 +57,9 @@ try{
   if(mobile)await page.locator('[data-action="sidebar"]').click();
   await page.locator('[data-action="theme"]').click();await stable(page,readingTop,'Theme rerender must retain reading position');
   if(mobile)await page.locator('[data-action="sidebar"]').click();
-  await page.locator('[data-chat="other"]').click();
+  await page.locator('[data-chat="other"]').click();await page.waitForFunction(()=>document.querySelector('#conversation')?.dataset.chat==='other');
   if(mobile)await page.locator('[data-action="sidebar"]').click();
-  await page.locator('[data-chat="history"]').click();assert(await lastQuestionVisible(page),'Switching chats must locate the last question');
+  await page.locator('[data-chat="history"]').click();await page.waitForFunction(()=>document.querySelector('#conversation')?.dataset.chat==='history');assert(await lastQuestionVisible(page),'Switching chats must locate the last question');
   await page.reload();await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('API 已连接'));
   assert(await lastQuestionVisible(page),'Reload must locate the last question');
 
@@ -104,6 +105,7 @@ try{
   stream.end('data: '+JSON.stringify({choices:[{delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');
   await page.waitForFunction(()=>document.querySelector('#send')?.dataset.action==='send');
   await stable(page,keyboardTop,'Completing and formatting the answer must not jump to bottom');
+  await page.waitForFunction(()=>document.querySelector('#storage-status')?.textContent.includes('已保存到服务器'));
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No horizontal page overflow');
   assert.deepEqual(errors,[]);await context.close();console.log('PASS '+label+': history, reload, chat switch, streaming pause/resume, rerender, keyboard, completion');
  }
