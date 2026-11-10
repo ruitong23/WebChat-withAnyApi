@@ -1,6 +1,11 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '重命名对话':'Rename chat',
+  '对话名称':'Chat name',
+  '对话已重命名':'Chat renamed',
+  '复制第一条用户消息':'Copy first user message',
+  '当前对话没有用户消息':'This chat has no user message',
   '请先停止该对话的生成':'Stop generation in this chat first',
   '已保存在服务器，留空保持不变':'Saved on server; leave blank to keep',
   '其他设备已有修改，已保留冲突副本':'Changes from another device were preserved; a conflict copy was saved',

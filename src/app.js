@@ -71,6 +71,17 @@ function save(){persistence.save();}
 async function flushSave(){const target=persistence.generation;do{if(!(await persistence.flush()))return false;}while(persistence.savedGeneration<target);return true;}
 function rememberDraft(){if($('#conversation')?.dataset.chat!==state.active)return;state.draft=$('#prompt')?.value??state.draft;chatDrafts.set(state.active,{text:state.draft,attachments:[...state.attachments]});}
 function restoreDraft(id){const draft=chatDrafts.get(id);state.draft=draft?.text||'';state.attachments=[...(draft?.attachments||[])];}
+function renameChat(id){
+ const chat=state.chats.find(c=>c.id===id);if(!chat)return;
+ inputModal(t('重命名对话'),t('对话名称'),chat.title,async name=>{
+  const target=state.chats.find(c=>c.id===chat.id);if(!target)return toast(t('对话不存在'));
+  target.title=name;save();
+  const list=$('#chat-list');if(list){const top=list.scrollTop;list.innerHTML=chatList();list._renderKey=sidebarRenderKey();list.scrollTop=top;}
+  if(state.active===target.id&&state.page==='chat')$('#chat-title').textContent=name;
+  if(await flushSave())toast(t('对话已重命名'));
+ });
+ $('#modal-input').maxLength=200;
+}
 function storageStatusHTML(){const labels={saved:t('已保存到服务器'),pending:t('等待保存'),saving:t('正在保存'),error:t('保存失败 · 重试')};return `<button class="local-label storage-status ${storageStatus==='error'?'save-error':''}" id="storage-status" data-action="retry-save" title="${esc(storageMessage?localizeError(storageMessage):t('对话和连接配置保存在服务器'))}">${icon('shield')}${esc(labels[storageStatus])}</button>`;}
 function projectChats(id=state.activeProject){return id==='*'?state.chats:state.chats.filter(c=>(c.projectId||'')===id);}
 function sidebarCount(id){const fresh=state.chats.filter(c=>!c._etag&&(id==='*'||(c.projectId||'')===id)).length;return (id==='*'?(state.listing?.total??0):(state.listing?.counts?.[id]??0))+fresh;}
@@ -166,7 +177,7 @@ function render(){
 }
 function sidebar(){return ui`<aside class="sidebar"><div class="brand row">${logo()}<div><div class="brand-name">Lumen <span>Studio</span></div><div class="brand-sub">模型客户端</div></div></div><nav class="nav" aria-label="主导航">${[['chat','chat',t('聊天'),'⌘ 1'],['models','box',t('模型库'),''],['connection','link',t('API 连接'),''],['logs','terminal',t('请求日志'),'']].map(([id,ic,name,k])=>`<button data-page="${id}" class="${state.page===id?'active':''}">${icon(ic)}<span>${name}</span>${id==='models'&&state.models.length?`<b class="badge">${state.models.length}</b>`:`<small class="shortcut">${k}</small>`}</button>`).join('')}</nav>${projectNav()}<div class="sidebar-heading row between"><span>工作空间</span><span class="small">${sidebarCount('*')} 个对话</span></div><button class="new-chat" data-action="new-chat">${icon('plus')}<span class="grow">新建对话</span><span class="shortcut">Ctrl N</span></button><div class="chat-search">${icon('search')}<input id="chat-search" placeholder="搜索对话…" value="${esc(state.chatFilter)}" aria-label="搜索对话"></div><div class="chat-list" id="chat-list">${chatList()}</div><div class="side-bottom"><button class="connection-mini" data-page="connection"><span class="dot ${state.connected?'online':''}"></span><span class="grow truncate">${esc(state.profile.name)}<small>${state.connected?ui`${state.models.length} 个模型可用`:t('添加 API 连接')}</small></span>${icon('chevron')}</button><div class="side-footer">${storageStatusHTML()}<span class="row">${ib(t('偏好设置'),'settings','settings')}${ib(t('切换深浅主题'),'theme',state.theme==='light'?'moon':'sun')}</span></div></div></aside>`;}
 const generationIndicator=()=>`<span class="chat-generation-spinner" role="status" aria-label="${t('正在生成')}" title="${t('正在生成')}"></span>`;
-function chatRow(c,nested=false){return ui`<div class="chat-item ${nested?'nested-chat':''} ${c.id===state.active?'selected':''}"><button data-chat="${esc(c.id)}" data-drag-chat="${esc(c.id)}" draggable="true" class="chat-open" title="${esc(c.title)}"><span class="truncate grow">${esc(c.title)}</span>${generations.has(c.id)?generationIndicator():''}</button><button class="icon-btn chat-delete" data-delete-chat="${esc(c.id)}" title="删除对话" aria-label="删除 ${esc(c.title)}">${icon('close')}</button></div>`;}
+function chatRow(c,nested=false){return ui`<div class="chat-item ${nested?'nested-chat':''} ${c.id===state.active?'selected':''}"><button data-chat="${esc(c.id)}" data-drag-chat="${esc(c.id)}" draggable="true" class="chat-open" title="${esc(c.title)}"><span class="truncate grow">${esc(c.title)}</span>${generations.has(c.id)?generationIndicator():''}</button><button class="icon-btn chat-rename" data-rename-chat="${esc(c.id)}" title="重命名对话" aria-label="${t('重命名对话')} ${esc(c.title)}">${icon('edit')}</button><button class="icon-btn chat-delete" data-delete-chat="${esc(c.id)}" title="删除对话" aria-label="删除 ${esc(c.title)}">${icon('close')}</button></div>`;}
 function refreshGenerationIndicators(){for(const row of $$('#chat-list [data-chat]')){const indicator=$('.chat-generation-spinner',row);if(generations.has(row.dataset.chat)){if(!indicator)row.insertAdjacentHTML('beforeend',generationIndicator());}else indicator?.remove();}}
 function chatList(){
  const expanded=state.sidebar.expandedProjects,focus=state.activeProject,priority=focus===''?['',...expanded]:[...(expanded.includes(focus)?[focus]:[]),...expanded.filter(id=>id!==focus),''];
@@ -176,14 +187,14 @@ function chatList(){
  const root=groups.get('')||[];
  return ui`${projects}<section class="ungrouped-chats" data-drop-project=""><button class="ungrouped-heading" data-project=""><span>未分组</span><small>${sidebarCount('')}</small></button>${root.map(c=>chatRow(c)).join('')}${!root.length?`<p class="folder-empty">${state.chatFilter?t('没有匹配的对话'):sidebarCount('')?t('加载更多后显示'):t('暂无对话')}</p>`:''}</section>${state.listing?.remaining>0?`<button class="load-more" data-action="load-more" ${state.sidebarLoading?'disabled':''}>${state.sidebarLoading?t('加载中…'):t('加载更多')}${icon('down')}</button>`:''}${state.sidebarLoading?`<p class="folder-empty" role="status">${t('加载中…')}</p>`:''}`;
 }
-function topbar(){const titles={chat:current().title,models:t('模型库'),connection:t('API 连接'),logs:t('请求日志'),settings:t('偏好设置')};return ui`<header class="topbar">${ib(t('展开导航'),'sidebar','menu','mobile-only')}<div class="breadcrumb"><span class="section-name">${esc(state.projects.find(p=>p.id===current().projectId)?.name||t('工作空间'))}</span><span class="slash">/</span><strong class="truncate" id="chat-title" draggable="true" data-drag-chat="${esc(current().id)}" title="${t('拖动对话到文件夹')}">${esc(titles[state.page])}</strong></div><div class="actions">${state.page==='chat'?`<button class="model-picker" data-action="pick-model">${icon('box')}<span class="truncate">${state.model?esc(modelName(state.model)):t('选择模型')}</span>${icon('down')}</button>${ib(t('移动对话到项目'),'move-chat','folder')}${ib(t('导出当前对话'),'export-chat','download','export-action')}${ib(t('参数设置'),'inspector','panel')}`:`<span class="badge purple">${state.native?t('LM Studio 原生 + OpenAI'):state.connected?t('OpenAI 兼容'):t('工作台')}</span>`}</div></header>`;}
+function topbar(){const titles={chat:current().title,models:t('模型库'),connection:t('API 连接'),logs:t('请求日志'),settings:t('偏好设置')};return ui`<header class="topbar">${ib(t('展开导航'),'sidebar','menu','mobile-only')}<div class="breadcrumb"><span class="section-name">${esc(state.projects.find(p=>p.id===current().projectId)?.name||t('工作空间'))}</span><span class="slash">/</span><strong class="truncate" id="chat-title" draggable="true" data-drag-chat="${esc(current().id)}" title="${t('拖动对话到文件夹')}">${esc(titles[state.page])}</strong></div><div class="actions">${state.page==='chat'?`<button class="model-picker" data-action="pick-model">${icon('box')}<span class="truncate">${state.model?esc(modelName(state.model)):t('选择模型')}</span>${icon('down')}</button>${ib(t('移动对话到项目'),'move-chat','folder')}${ib(t('复制第一条用户消息'),'copy-first-user','copy','copy-first-action')}${ib(t('参数设置'),'inspector','panel')}`:`<span class="badge purple">${state.native?t('LM Studio 原生 + OpenAI'):state.connected?t('OpenAI 兼容'):t('工作台')}</span>`}</div></header>`;}
 function renderPage(previous=conversationScroll?.snapshot()){const el=$('#main-page');if(!el)return;el.className=state.page==='chat'?'chat-page':'page';if(state.page==='chat')el.innerHTML=chatPage();else if(state.page==='connection')el.innerHTML=connectionPage();else if(state.page==='models')el.innerHTML=modelsPage();else if(state.page==='logs')el.innerHTML=logsPage();else el.innerHTML=settingsPage();bindPage();bindConversationScroll(previous);}
 function chatPage(){return ui`<div class="conversation" id="conversation" data-chat="${current().id}">${current().messages.length?`<div class="message-list" id="messages">${current().messages.map(messageHTML).join('')}</div>`:welcome()}</div><div class="composer-wrap"><div id="thinking-slot">${thinkingDockHTML()}</div><div class="composer">${state.attachments.length?`<div class="attachment-line" style="padding:10px 14px 0">${state.attachments.map((a,i)=>ui`<span class="attachment-chip">${a.type==='image'?`<img src="${a.data}" alt="">`:icon('file')}<span class="truncate">${esc(a.name)}</span><button class="icon-btn" data-remove-attachment="${i}" aria-label="移除附件">${icon('close')}</button></span>`).join('')}</div>`:''}<textarea id="prompt" aria-label="消息" placeholder="输入消息…" rows="2">${esc(state.draft)}</textarea><div class="composer-tools">${ib(t('添加图片或文本附件'),'attach','paperclip')}<span class="small muted">${state.model?esc(modelName(state.model)):t('尚未选择模型')}</span><span class="grow"></span>${state.preview?t('<span class="badge">演示模式</span>'):''}<span class="small muted desktop-col">Enter 发送</span><button class="send-btn" id="send" aria-label="${state.streaming?t('停止生成'):t('发送消息')}" data-action="${state.streaming?'stop':'send'}" ${!state.streaming&&(!state.connected||!state.model)?'disabled':''}>${icon(state.streaming?'stop':'send')}</button></div></div>${metricsHTML()}<div class="composer-foot"><span>${state.streaming?t('正在生成'):t('Shift + Enter 换行')}<span id="draft-size"></span></span><span class="hint-right">${icon('shield')} ${state.profile.mode==='direct'?t('直连'):t('转发')}</span></div></div>`;}
 function welcome(){return ui`<section class="welcome"><div class="welcome-logo">${logo()}</div><h1>新对话</h1><div class="welcome-actions" style="margin-top:24px">${button(state.connected?t('选择模型'):t('添加连接'),state.connected?'pick-model':'connect-page','link','primary')}${button(t('模型库'),'models-page','box')}</div></section>`;}
 function inlineMD(text){return esc(text).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');}
 function markdown(text){const chunks=String(text||'').split(/```([^\n]*)\n([\s\S]*?)(?:```|$)/g);return chunks.map((s,i)=>{if(i%3===1)return '';if(i%3===2)return `<pre><code>${esc(s)}</code></pre>`;return s.split('\n').map(line=>{if(/^#{1,6}\s/.test(line))return `<h3>${inlineMD(line.replace(/^#+\s/,''))}</h3>`;if(/^>\s/.test(line))return `<blockquote>${inlineMD(line.slice(2))}</blockquote>`;if(/^[-*]\s/.test(line))return `<div style="padding-left:14px">• ${inlineMD(line.slice(2))}</div>`;return line?`<p>${inlineMD(line)}</p>`:'';}).join('');}).join('');}
 function contentText(m){return typeof m.content==='string'?m.content:(m.content||[]).filter(p=>p.type==='text').map(p=>p.text).join('\n');}
-function messageHTML(m,index){return `<article class="message ${m.error?'error':''}" id="msg-${m.id}"><div class="message-head"><span class="avatar ${m.role==='assistant'?'assistant':''}">${m.role==='user'?t('你'):icon(m.role==='tool'?'code':'bolt')}</span><span>${m.role==='user'?t('你'):m.role==='tool'?t('工具结果'):esc(m.model?modelName(m.model):'Assistant')}</span>${m.status==='stopped'?t('<span class="badge">已停止</span>'):''}</div>${m.reasoning?`<details class="reasoning" data-reasoning-id="${m.id}" ${m.reasoningOpen?'open':''}><summary><span>${m.thinking?t('思考过程 · 正在接收'):t('思考过程')}</span></summary><pre></pre></details>`:''}<div class="message-content ${state.streaming&&index===current().messages.length-1?'cursor':''}">${markdown(contentText(m))}${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>/^data:image\//.test(p.image_url.url)?ui`<img src="${esc(p.image_url.url)}" alt="上传的图片">`:'').join(''):''}${m.tool_calls?.length?ui`<p class="muted small">工具调用</p>${m.tool_calls.map(t=>`<pre><code>${esc(t.function?.name)}\n${esc(t.function?.arguments)}</code></pre>`).join('')}${button(t('填写工具执行结果'),'tool-result','code')}`:''}</div>${completionNotice(m)}<div class="message-meta">${ib(t('复制消息'),'copy-message:'+m.id,'copy')}${m.role==='user'?ib(t('编辑并重新生成'),'edit-message:'+m.id,'edit'):''}${m.role==='assistant'&&!m.error?ib(t('从这里重新生成'),'regenerate:'+m.id,'refresh'):''}${m.error?button(t('重试'),'retry','refresh'):''}${m.ms?`<span>${(m.ms/1000).toFixed(1)} s</span>`:''}${m.role==='assistant'?ui`<span class="received-label">已接收 ${receptionLabel(m)}</span><span class="received-chars">${receptionStats(m).chars.toLocaleString()} 字符</span>`:''}</div></article>`;}
+function messageHTML(m,index){return `<article class="message ${m.role==='user'?'user-message':''} ${m.error?'error':''}" id="msg-${m.id}"><div class="message-head"><span class="avatar ${m.role==='assistant'?'assistant':''}">${m.role==='user'?t('你'):icon(m.role==='tool'?'code':'bolt')}</span><span>${m.role==='user'?t('你'):m.role==='tool'?t('工具结果'):esc(m.model?modelName(m.model):'Assistant')}</span>${m.status==='stopped'?t('<span class="badge">已停止</span>'):''}</div>${m.reasoning?`<details class="reasoning" data-reasoning-id="${m.id}" ${m.reasoningOpen?'open':''}><summary><span>${m.thinking?t('思考过程 · 正在接收'):t('思考过程')}</span></summary><pre></pre></details>`:''}<div class="message-content ${state.streaming&&index===current().messages.length-1?'cursor':''}">${markdown(contentText(m))}${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>/^data:image\//.test(p.image_url.url)?ui`<img src="${esc(p.image_url.url)}" alt="上传的图片">`:'').join(''):''}${m.tool_calls?.length?ui`<p class="muted small">工具调用</p>${m.tool_calls.map(t=>`<pre><code>${esc(t.function?.name)}\n${esc(t.function?.arguments)}</code></pre>`).join('')}${button(t('填写工具执行结果'),'tool-result','code')}`:''}</div>${completionNotice(m)}<div class="message-meta">${ib(t('复制消息'),'copy-message:'+m.id,'copy')}${m.role==='user'?ib(t('编辑并重新生成'),'edit-message:'+m.id,'edit'):''}${m.role==='assistant'&&!m.error?ib(t('从这里重新生成'),'regenerate:'+m.id,'refresh'):''}${m.error?button(t('重试'),'retry','refresh'):''}${m.ms?`<span>${(m.ms/1000).toFixed(1)} s</span>`:''}${m.role==='assistant'?ui`<span class="received-label">已接收 ${receptionLabel(m)}</span><span class="received-chars">${receptionStats(m).chars.toLocaleString()} 字符</span>`:''}</div></article>`;}
 function parameterValue(name){if(!configurableParams.includes(name)||state.params['override_'+name]||Object.hasOwn(hostLoadConfig(),name))return state.params[name];return '';}
 function parameterMode(name){if(!configurableParams.includes(name))return '';const enabled=state.params['override_'+name];return `<button type="button" class="param-mode ${enabled?'overridden':''}" data-override="${name}" aria-pressed="${!!enabled}">${enabled?t('恢复默认'):Object.hasOwn(hostLoadConfig(),name)?t('自定义'):t('自定义')}</button>`;}
 const rangeField=(name,title,min,max,step,hint='')=>ui`<div class="field"><div class="field-head"><label for="p-${name}">${title}</label><input type="number" id="p-${name}" data-param="${name}" min="${min}" max="${max}" step="${step}" value="${parameterValue(name)}" placeholder="默认" ${!state.params['override_'+name]?'disabled':''}></div>${parameterMode(name)}<input aria-label="${title} 滑杆" type="range" data-range="${name}" min="${min}" max="${max}" step="${step}" value="${state.params[name]}" ${!state.params['override_'+name]?'disabled':''}><div class="range-labels"><span>${min}</span><span>${max}</span></div></div>`;
@@ -229,6 +240,7 @@ async function onClick(e){const el=e.target.closest('button,[data-action]');if(!
  if(el.dataset.page)return go(el.dataset.page);
  if(el.hasAttribute('data-project'))return selectProject(el.dataset.project);
  if(el.dataset.chat)return openChat(el.dataset.chat);
+ if(el.dataset.renameChat)return renameChat(el.dataset.renameChat);
  if(el.dataset.deleteChat)return confirmModal(t('删除对话'),t('删除此对话？'),()=>removeChat(el.dataset.deleteChat));
  if(el.dataset.tab){state.inspectorTab=el.dataset.tab;renderInspector();return;}
  if(el.dataset.useModel){await setModel(el.dataset.useModel);go('chat');$('#prompt')?.focus();return;}
@@ -248,7 +260,7 @@ async function onClick(e){const el=e.target.closest('button,[data-action]');if(!
  case 'toggle-key':{const key=$('#api-key');key.type=key.type==='password'?'text':'password';}break;
  case 'reset-params':state.params={...defaults,system:state.params.system};persistParams();renderInspector();toast(t('生成参数已恢复默认'));break;
  case 'save-preset':inputModal(t('保存参数预设'),t('预设名称'),t('我的预设'),name=>{presets.push({name,params:{...state.params}});save();renderInspector();});break;
- case 'system-presets':systemPresets();break;case 'export-chat':exportData(false);break;case 'export-all':exportData(true);break;case 'import':$('#import-input').click();break;case 'attach':$('#file-input').click();break;
+ case 'system-presets':systemPresets();break;case 'copy-first-user':{const message=current().messages.find(m=>m.role==='user');if(message)copy(contentText(message));else toast(t('当前对话没有用户消息'));break;}case 'export-chat':exportData(false);break;case 'export-all':exportData(true);break;case 'import':$('#import-input').click();break;case 'attach':$('#file-input').click();break;
  case 'clear-logs':state.logs=[];renderPage();break;case 'new-profile':disconnect(false);state.profile={id:uid(),name:t('新 API 连接'),baseUrl:'',mode:'proxy',remember:true,nativeUrl:''};apiKey='';state.result='';render();break;
  case 'load-selected':if(!state.model)return toast(t('请先选择模型'));manageModel(state.model,true);break;case 'download-model':downloadModal();break;case 'retry':retry();break;case 'tool-result':toolResult();break;case 'request-preview':requestPreview();break;case 'shortcuts':openModal(t('快捷键'),t('<div class="capability-list"><div class="capability">新建对话 <span class="grow"></span><kbd>Ctrl + N</kbd></div><div class="capability">发送消息 <span class="grow"></span><kbd>Enter</kbd></div><div class="capability">换行 <span class="grow"></span><kbd>Shift + Enter</kbd></div><div class="capability">关闭弹窗 <span class="grow"></span><kbd>Escape</kbd></div></div>'));break;
  case 'forget-keys':confirmModal(t('清除密钥'),t('移除此工作台在服务器中保存的所有 API 密钥。'),async()=>{persistence.clearKeys();temporaryKeys={};apiKey='';save();if(await flushSave())toast(t('已清除保存的密钥'));});break;
@@ -346,7 +358,7 @@ async function send({regenerateMessages=null}={}){
  chat.params={...state.params};chat.messages.push(assistant);generations.set(chat.id,task);
  state.attachments=[];state.draft='';chatDrafts.delete(chat.id);
  const prompt=$('#prompt');if(prompt){prompt.value='';prompt.style.height='';}
- const start=performance.now();reconcileConversation();updateSendUI();renderThinkingDock();conversationScroll?.scrollToQuestion();save();
+ const start=performance.now();reconcileConversation();updateSendUI();renderThinkingDock();conversationScroll?.scrollToResponse(assistant.id);save();
  try{
   if(task.preview){
    const reply=t('演示消息。');
@@ -450,17 +462,36 @@ function updateAssistant(m,final=false,chat=current()){
   $('.message-head',el).innerHTML=$('.message-head',fresh).innerHTML;$('.message-meta',el).innerHTML=$('.message-meta',fresh).innerHTML;
   $('.completion-notice',el)?.remove();const notice=$('.completion-notice',fresh);if(notice)el.insertBefore(notice,$('.message-meta',el));
  }
- renderMetrics();renderThinkingDock();if(follow)scrollBottom();
+ conversationScroll?.updateSpace();renderMetrics();renderThinkingDock();if(follow)scrollBottom();
 }
 
 function bindConversationScroll(previous){
+ conversationScroll?.destroy();
  const c=$('#conversation');conversationScroll=null;if(!c)return;
  const sameChat=previous?.chat===c.dataset.chat;
- let following=sameChat?previous.following:false,lastTop=c.scrollTop,touchY=null;
+ const latest=current().messages.findLast(m=>m.role==='assistant')||current().messages.findLast(m=>m.role==='user');
+ let anchorId=sameChat?previous.anchorId||latest?.id:latest?.id;
+ let following=sameChat?previous.following:false,lastTop=c.scrollTop,touchY=null,observedList=null;
  const atBottom=()=>c.scrollHeight-c.scrollTop-c.clientHeight<=1;
- // Record our own scrolls immediately; their delayed scroll events are not user intent.
  const scrollTo=top=>{c.scrollTo({top,behavior:'instant'});lastTop=c.scrollTop;};
- const scrollToQuestion=()=>{following=false;const message=current().messages.findLast(m=>m.role==='user'),el=message&&document.getElementById('msg-'+message.id);scrollTo(el?c.scrollTop+el.getBoundingClientRect().top-c.getBoundingClientRect().top-20:0);};
+ const observer=new ResizeObserver(()=>updateSpace());
+ // Reserve just enough room for a short or empty reply to start near the top.
+ // The reserved space shrinks as the reply grows, without enabling auto-follow.
+ function updateSpace(){
+  const list=$('#messages',c),message=anchorId&&document.getElementById('msg-'+anchorId);
+  let space=$('.conversation-end-space',c);
+  if(!list||!message){if(space)space.style.height='0px';return;}
+  if(observedList!==list){if(observedList)observer.unobserve(observedList);observer.observe(list);observedList=list;}
+  if(!space){space=document.createElement('div');space.className='conversation-end-space';space.setAttribute('aria-hidden','true');c.append(space);}
+  const remaining=list.getBoundingClientRect().bottom-message.getBoundingClientRect().top;
+  const height=Math.max(0,Math.ceil(c.clientHeight-20-remaining));
+  if(space.style.height!==height+'px')space.style.height=height+'px';
+ }
+ const scrollToResponse=id=>{
+  anchorId=id||current().messages.findLast(m=>m.role==='assistant')?.id;following=false;updateSpace();
+  const message=anchorId&&document.getElementById('msg-'+anchorId);
+  scrollTo(message?c.scrollTop+message.getBoundingClientRect().top-c.getBoundingClientRect().top-20:0);
+ };
  const onIntent=direction=>{if(direction<0)following=false;else if(direction>0)following=atBottom();};
  c.addEventListener('wheel',e=>onIntent(e.deltaY),{passive:true});
  c.addEventListener('touchstart',e=>{touchY=e.touches[0]?.clientY??null;},{passive:true});
@@ -470,8 +501,9 @@ function bindConversationScroll(previous){
  c.tabIndex=0;
  c.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select,[contenteditable]'))return;if(['ArrowUp','PageUp','Home'].includes(e.key)||(e.key===' '&&e.shiftKey))onIntent(-1);else if(['ArrowDown','PageDown','End',' '].includes(e.key))onIntent(1);});
  c.addEventListener('scroll',()=>{const top=c.scrollTop;if(top!==lastTop)following=top>lastTop&&atBottom();lastTop=top;},{passive:true});
- conversationScroll={get following(){return following;},snapshot:()=>({chat:c.dataset.chat,top:c.scrollTop,following}),scrollToBottom:()=>scrollTo(c.scrollHeight),scrollToQuestion};
- if(sameChat)scrollTo(previous.top);else{const message=current().messages.findLast(m=>m.role==='assistant')||current().messages.findLast(m=>m.role==='user'),el=message&&document.getElementById('msg-'+message.id);scrollTo(el?c.scrollTop+el.getBoundingClientRect().top-c.getBoundingClientRect().top-20:0);}
+ observer.observe(c);updateSpace();
+ conversationScroll={get following(){return following;},snapshot:()=>({chat:c.dataset.chat,top:c.scrollTop,following,anchorId}),scrollToBottom:()=>scrollTo(c.scrollHeight),scrollToResponse,updateSpace,destroy:()=>observer.disconnect()};
+ if(sameChat)scrollTo(previous.top);else scrollToResponse(anchorId);
 }
 function scrollBottom(){conversationScroll?.scrollToBottom();}
 function retry(){if(state.streaming)return;const messages=[...current().messages];while(messages.at(-1)?.role==='assistant')messages.pop();send({regenerateMessages:messages});}
