@@ -203,3 +203,26 @@ test('a pending local save never turns an unseen remote connection addition into
  const client=createWorkspacePersistence({initial,read:()=>structuredClone(local)});
  local.chats[0].title='first';client.save();const first=client.flush();local.chats[0].title='second';client.save();release();assert(await first);assert(await client.flush());
 });
+
+test('sidebar order follows final assistant output time and is unchanged by opening or renaming a chat',async()=>{
+ const dir=await mkdtemp(join(fixtureRoot,'output-order-')),path=join(dir,'workspace.json');
+ try{
+  const store=createWorkspaceStore(path),a={...chat('a'),created:1},b={...chat('b'),created:2};
+  a.messages.push({id:'aa',role:'assistant',content:'older output',created:10,finishedAt:30,status:'complete'});
+  b.messages.push({id:'ba',role:'assistant',content:'latest output',created:5,finishedAt:50,status:'complete'});
+  await store.update(0,{chats:[a,b],active:'a',projects:[]});
+  assert.deepEqual((await store.getSidebar()).listing.ids,['b','a']);
+  await store.patch({settings:{active:'a'}});assert.deepEqual((await store.getSidebar()).listing.ids,['b','a']);
+  let loaded=await store.getChat('a');await store.patch({chats:[{id:'a',baseEtag:loaded._etag,title:'renamed'}]});
+  assert.deepEqual((await store.getSidebar()).listing.ids,['b','a']);
+  loaded=await store.getChat('a');loaded.chat.messages.push({id:'pending',role:'assistant',content:'',created:100,status:'pending'});
+  await store.patch({chats:[{id:'a',baseEtag:loaded._etag,chat:loaded.chat}]});assert.deepEqual((await store.getSidebar()).listing.ids,['b','a']);
+  loaded=await store.getChat('a');Object.assign(loaded.chat.messages.at(-1),{content:'new result',finishedAt:120,status:'complete'});
+  await store.patch({chats:[{id:'a',baseEtag:loaded._etag,chat:loaded.chat}]});assert.deepEqual((await store.getSidebar()).listing.ids,['a','b']);
+  const metadata=(await store.getSidebar()).data.chats[0];assert.equal(metadata.lastOutputAt,120);assert.equal(metadata.messages,undefined);
+  const bodyPath=join(dir,conversationPath(loaded.chat)),before=await readFile(bodyPath,'utf8');
+  const oldIndex=JSON.parse(await readFile(path,'utf8'));oldIndex.catalogVersion=1;for(const ref of oldIndex.data.chats)delete ref.lastOutputAt;await writeFile(path,JSON.stringify(oldIndex));
+  assert.deepEqual((await createWorkspaceStore(path).getSidebar()).listing.ids,['a','b']);
+  assert.equal(await readFile(bodyPath,'utf8'),before,'Adding reply-time metadata must not rewrite any conversation');
+ }finally{await removeFixture(dir);}
+});

@@ -5,6 +5,8 @@ import {publicProfile,matchingProfile} from './workspace-public.mjs';
 
 const fields=new Set(['parameterPolicyVersion','profile','profiles','chats','projects','active','activeProject','sidebar','theme','inspector','presets','keys']);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+const time=value=>{const number=typeof value==='string'?Number(value)||Date.parse(value):value;return Number.isFinite(number)&&number>0?number:0;};
+const lastOutputTime=chat=>{let latest=0;for(const message of chat.messages||[])if(message.role==='assistant'&&message.status!=='pending'&&!message.error&&(message.content?.length||message.reasoning?.length||message.tool_calls?.length))latest=Math.max(latest,time(message.finishedAt),time(message.lastActivityAt),(time(message.created)||time(chat.created))+time(message.ms));return latest;};
 const token=id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)?id:'id-'+createHash('sha256').update(id).digest('hex');
 export const projectPath=id=>'projects/'+token(id);
 export const conversationPath=chat=>(chat.projectId?projectPath(chat.projectId)+'/':'')+'conversations/'+token(chat.id)+'.json';
@@ -35,8 +37,8 @@ export function createWorkspaceStore(filePath){
  const atomicWrite=async(path,value)=>{await mkdir(dirname(path),{recursive:true});const temporary=path+'.'+randomUUID()+'.tmp';try{await writeFile(temporary,JSON.stringify(value),{encoding:'utf8',mode:0o600});await rename(temporary,path);}finally{await rm(temporary,{force:true});}};
  const etag=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
  const projectRef=p=>({id:p.id,name:p.name,created:p.created,path:projectPath(p.id)+'/project.json',_etag:etag(p)});
- const chatRef=c=>({id:c.id,title:c.title,created:c.created,model:c.model,projectId:c.projectId||'',path:conversationPath(c),_etag:etag(c)});
- const indexFor=record=>({...record,catalogVersion:1,data:{...record.data,projects:(record.data.projects||[]).map(projectRef),chats:(record.data.chats||[]).map(chatRef)}});
+ const chatRef=c=>({id:c.id,title:c.title,created:c.created,lastOutputAt:lastOutputTime(c),model:c.model,projectId:c.projectId||'',path:conversationPath(c),_etag:etag(c)});
+ const indexFor=record=>({...record,catalogVersion:2,data:{...record.data,projects:(record.data.projects||[]).map(projectRef),chats:(record.data.chats||[]).map(chatRef)}});
  const entries=data=>[...(data.projects||[]).map(p=>({path:projectPath(p.id)+'/project.json',value:p})),...(data.chats||[]).map(c=>({path:conversationPath(c),value:c}))];
  const validateIndex=index=>{
   if(index.version!==2||!Number.isSafeInteger(index.revision)||index.revision<0||!Array.isArray(index.data?.projects)||!Array.isArray(index.data?.chats))throw new Error('服务器工作空间文件格式无效');
@@ -80,7 +82,13 @@ export function createWorkspaceStore(filePath){
    await commit({data:{}},record);return indexFor(record);
   }
   validateIndex(index);
-  if(index.catalogVersion!==1){index=indexFor(await materialize(index));await atomicWrite(filePath,index);}
+  if(index.catalogVersion===1){
+   // Upgrade reply-time metadata one conversation at a time, without retaining
+   // every history in memory or rewriting any conversation file.
+   const chats=[];
+   for(const ref of index.data.chats){const chat=await read(target(ref.path));if(chat.id!==ref.id||conversationPath(chat)!==ref.path)throw new Error('对话数据格式无效');chats.push({...ref,lastOutputAt:lastOutputTime(chat)});}
+   index={...index,catalogVersion:2,data:{...index.data,chats}};await atomicWrite(filePath,index);
+  }else if(index.catalogVersion!==2){index=indexFor(await materialize(index));await atomicWrite(filePath,index);}
   return index;
  };
  const load=async()=>{const index=await loadIndex();return index.revision===0&&!index.data.chats?index:materialize(index);};
@@ -92,7 +100,7 @@ export function createWorkspaceStore(filePath){
   const priority=focus===''?['',...expanded]:[...(expanded.includes(focus)?[focus]:[]),...expanded.filter(id=>id!==focus),''];
   const queryFilter=String(options.filter??saved.filter??''),filter=queryFilter.toLowerCase(),all=index.data.chats||[],counts=Object.fromEntries(['',...ids].map(id=>[id,0])),groups=new Map(priority.map(id=>[id,[]]));
   for(const chat of all){const id=chat.projectId||'';counts[id]=(counts[id]||0)+1;if(groups.has(id)&&(!filter||chat.title.toLowerCase().includes(filter)))groups.get(id).push(chat);}
-  const eligible=priority.flatMap(id=>{const group=groups.get(id),active=group.find(c=>c.id===index.data.active);return active?[active,...group.filter(c=>c!==active)]:group;});
+  const eligible=priority.flatMap(id=>groups.get(id).sort((a,b)=>(time(b.lastOutputAt)||time(b.created))-(time(a.lastOutputAt)||time(a.created))));
   const visible=eligible.slice(0,limit),summaries=visible.map(({path,...c})=>c);
   return {...index,partial:true,data:{...index.data,projects,chats:summaries,sidebar:{...saved,expandedProjects:expanded,limit,filter:queryFilter}},listing:{ids:visible.map(c=>c.id),limit,expandedProjects:expanded,total:all.length,eligible:eligible.length,remaining:Math.max(0,eligible.length-visible.length),counts},activeId:all.some(c=>c.id===index.data.active)?index.data.active:visible[0]?.id||all[0]?.id||''};
  };
@@ -152,7 +160,7 @@ export function createWorkspaceStore(filePath){
   if(settings.active&&remaps.chats[settings.active])settings.active=remaps.chats[settings.active];
   if(remaps.chats[index.data.active])index.data.active=remaps.chats[index.data.active];
   if(remaps.profiles[index.data.profile?.id])index.data.profile={...index.data.profile,id:remaps.profiles[index.data.profile.id]};
-  Object.assign(index.data,settings);index.revision++;index.updatedAt=new Date().toISOString();index.catalogVersion=1;
+  Object.assign(index.data,settings);index.revision++;index.updatedAt=new Date().toISOString();index.catalogVersion=2;
   for(const path of writes.keys())removals.delete(path);
   const journal={version:1,index,writes:[...writes].map(([path,value])=>({path,value})),removals:[...removals]};await atomicWrite(journalPath,journal);await finish(journal);
   return {record:withProfileEtags(page(index)),etags,projectEtags,remaps,conflicts};

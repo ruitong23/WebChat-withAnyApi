@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {mkdtemp,mkdir,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -57,8 +57,13 @@ try{
  await page.locator('[data-page="chat"]').first().click();
  const chooser=page.waitForEvent('filechooser');await page.locator('[data-action="attach"]').click();await (await chooser).setFiles({name:'note.txt',mimeType:'text/plain',buffer:Buffer.from('需要保留在服务器的附件内容')});
  await page.locator('#prompt').fill('这条消息应保存到服务器');await page.locator('#send').click();
- await wait(async()=>(await record()).data.chats?.some(c=>c.messages.some(m=>m.role==='assistant'&&m.status==='pending'&&m.content?.length>0)),'partial stream saved before completion');
- console.log('PASS ongoing streaming output is periodically saved to disk');
+ await page.waitForFunction(()=>[...document.querySelectorAll('.message-content')].some(el=>el.textContent.includes('第 5 段')));
+ const during=await record(),pending=during.data.chats.find(c=>c.id===during.data.active);
+ assert.equal(pending.messages.at(-1).content,'','Partial response must stay in memory until generation finishes');
+ const pendingIndex=JSON.parse(await readFile(join(temporary,'workspace.json'),'utf8')),pendingFile=join(temporary,pendingIndex.data.chats.find(c=>c.id===pending.id).path),before=await stat(pendingFile);
+ await page.waitForFunction(()=>[...document.querySelectorAll('.message-content')].some(el=>el.textContent.includes('第 20 段')));
+ assert.equal((await stat(pendingFile)).mtimeMs,before.mtimeMs,'Receiving tokens must not rewrite the conversation');
+ console.log('PASS question is saved before generation; response remains in memory without periodic disk writes');
  await page.waitForFunction(()=>document.querySelector('#send')?.dataset.action==='send');
  await page.waitForFunction(()=>document.querySelector('#storage-status')?.textContent.includes('已保存到服务器'));
  const saved=await record(),active=saved.data.chats.find(c=>c.id===saved.data.active);

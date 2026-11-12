@@ -38,7 +38,7 @@ try{
   const context=await browser.newContext({locale:'zh-CN',viewport:mobile?{width:390,height:844}:{width:1440,height:1000},isMobile:mobile,hasTouch:mobile}),page=await context.newPage(),errors=[];
   page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));
   const sidebar=async()=>{if(mobile&&!(await page.locator('#shell').getAttribute('class')).includes('show-sidebar'))await page.locator('[data-action="sidebar"]').click();};
-  const open=async id=>{await sidebar();await page.locator('button[data-chat="'+id+'"]').click();await page.waitForFunction(id=>document.querySelector('#conversation')?.dataset.chat===id,id);if(mobile&&await page.locator('#shell').evaluate(el=>el.classList.contains('show-sidebar')))await page.locator('[data-action="close-drawers"]').click({position:{x:380,y:200}});};
+  const open=async id=>{await sidebar();await page.locator('button[data-chat="'+id+'"]').click();await page.waitForFunction(id=>document.querySelector('#conversation')?.dataset.chat===id,id);if(mobile)await page.waitForFunction(()=>!document.querySelector('#shell').classList.contains('show-sidebar'));};
   const saved=()=>page.waitForFunction(()=>document.querySelector('#storage-status')?.textContent.includes('已保存到服务器'));
   const spinner=id=>page.locator('button[data-chat="'+id+'"] .chat-generation-spinner');
   await page.goto(url);await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('API 已连接'));await saved();
@@ -72,9 +72,9 @@ try{
   const original=await(await fetch(url+'/api/chats/a')).json();
   assert.equal((await fetch(url+'/api/workspace',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({changes:{chats:[{id:'a',baseEtag:original._etag,chat:{...original.chat,title:'Remote original'}}]}})})).status,200);
   await page.waitForTimeout(220);chunk('D-output','D 在后台冲突后继续。');
-  let copy;await wait(async()=>{copy=(await record()).data.chats.find(chat=>chat.id!=='a'&&chat.id!=='b'&&chat.id!==newId);return !!copy;},'background conflict copy');
-  await wait(async()=>await spinner(copy.id).count()===1,'spinner follows conflict copy');await open(copy.id);await page.getByText('D 在后台冲突后继续。',{exact:false}).first().waitFor();
-  await page.locator('#send').click();await wait(()=>requests.get('D-output').closed,'stop remapped task');await saved();assert.equal((await(await fetch(url+'/api/chats/a')).json()).chat.title,'Remote original');
+  await open('a');await page.getByText('D 在后台冲突后继续。',{exact:false}).first().waitFor();await page.locator('#send').click();await wait(()=>requests.get('D-output').closed,'stop conflicted task');
+  let copy;await wait(async()=>{copy=(await record()).data.chats.find(chat=>chat.id!=='a'&&chat.id!=='b'&&chat.id!==newId);return !!copy;},'conflict copy saved on stop');
+  await saved();await open(copy.id);await page.getByText('D 在后台冲突后继续。',{exact:false}).first().waitFor();assert.equal((await(await fetch(url+'/api/chats/a')).json()).chat.title,'Remote original');
   await open(newId);
   await page.reload();await page.getByText('C 在设置页面期间继续。',{exact:false}).first().waitFor();assert.equal(await page.locator('.chat-generation-spinner').count(),0);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);await page.screenshot({path:join(qa,label+'-completed.png')});await context.close();

@@ -60,6 +60,7 @@ Some APIs reject `stream_options.include_usage`; disable **Include usage** for t
 
 - Multiple API connections, model search, chat history, import/export, attachments, and light/dark themes.
 - Streaming responses, stop/retry, edit/regenerate, reasoning display, and received-token counters.
+- Markdown is rendered during streaming with the same layout used after completion. The question is saved before requesting the model; output stays in memory until completion, stop, or interruption. Chat titles are ordered by their latest assistant output time, independently of which chat is selected.
 - Open history at the beginning of the latest assistant reply. Browse other chats/pages during generation, with per-chat spinners, drafts, concurrent requests, and independent stop controls.
 - Sending a question opens its new assistant reply immediately, including after long prompts. Rename chats from the sidebar, copy the first user message from the top bar, and distinguish right-side user messages from assistant replies.
 - Parameter presets, system prompts, request previews, and per-model shared settings.
@@ -75,7 +76,7 @@ Different browsers visiting the same server use the same workspace. This version
 
 For a Git-managed server, run `npm start` from the clone and proxy the site to Node. The generic systemd and Nginx examples use `/opt/lumen`, `/var/lib/lumen`, port `4177`, and service name `lumen`; adapt them to your environment. Keep machine-specific settings outside the checkout. Future updates use `git pull --ff-only origin main` followed by a restart of your service; Git does not restart the application automatically. No build or archive is required, and the persistent data directory is retained across updates. A standalone `dist/` build remains optional; see [the deployment guide](deploy/README.md) and [Nginx configuration](deploy/nginx.conf).
 
-Set LUMEN_DATA_DIR to select a persistent server data directory; its default is the project's data/ directory. Keep and back up this directory across updates and restarts. Run one Node instance against it. Changed conversation/project files are written atomically with revision checks and a recovery journal. Concurrent chat/connection edits save conflict copies, and edits after remote deletion save recovery copies. Idle pages poll revisions every three seconds without loading all messages, preserving drafts and the local view. Model requests wait for the question to be saved; final output is flushed and unsaved changes trigger the browser's leave-page prompt. Total workspace save size is limited to 128 MiB; streaming output is saved periodically, and saving failures remain visible with retry support.
+Set LUMEN_DATA_DIR to select a persistent server data directory; its default is the project's data/ directory. Keep and back up this directory across updates and restarts. Run one Node instance against it. Changed conversation/project files are written atomically with revision checks and a recovery journal. Concurrent chat/connection edits save conflict copies, and edits after remote deletion save recovery copies. Idle pages poll revisions every three seconds without loading all messages, preserving drafts and the local view. Model requests wait for the question to be saved; output is written when generation completes, stops, or fails, and unsaved changes trigger the browser's leave-page prompt. Streaming chunks do not trigger disk writes, and unrelated saves exclude unfinished output. Total workspace save size is limited to 128 MiB; saving failures remain visible with retry support.
 
 Use **Settings → Data → Import legacy browser data** to copy this browser's old records or presets to the server. After a successful save, migrated Lumen browser entries are removed; failed imports retain them. Opening the new version never automatically replaces server records with old local records. Chat JSON import/export also preserves project membership. Earlier single-file JSON data migrates automatically, keeping workspace.json.v1.bak intact. Create a project with the current chat, every chat in the selected group, or an empty conversation; moving chats changes their disk location. Deleting a project moves its conversations to Ungrouped.
 
@@ -97,5 +98,7 @@ npm test
 `npm run test:generation` checks desktop/mobile navigation during generation, per-chat activity, concurrent streams, drafts, connection/model isolation, project moves, conflict copies, and saved output after reload.
 
 `npm run test:chat-actions` checks long-prompt reply positioning, chat renaming and persistence, first-user-message copy, and right-side user avatars on desktop and mobile.
+
+`npm run test:streaming` checks deferred output saves, incremental Markdown layout, safe rendering, stable reading position at completion, and sidebar order based on the latest output rather than clicks.
 
 This is an independent client and is not an official LM Studio product.

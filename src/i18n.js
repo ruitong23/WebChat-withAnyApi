@@ -1,6 +1,8 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '问题已保存到服务器':'Question saved on server',
+  '回复将在生成结束后保存':'The reply will be saved when generation ends',
   '重命名对话':'Rename chat',
   '对话名称':'Chat name',
   '对话已重命名':'Chat renamed',

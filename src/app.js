@@ -40,7 +40,7 @@ let shared={id:'',record:null,remote:null,dirty:{},baseline:{},effective:{},stat
 const loadKeys=['context_length','eval_batch_size','flash_attention','offload_kv_cache_to_gpu','num_experts'];
 function current(){return state.chats.find(c=>c.id===state.active)||state.chats[0];}
 let storageStatus='saved',storageMessage='';
-const workspaceSnapshot=()=>structuredClone({parameterPolicyVersion:1,profile:state.profile,profiles:state.profiles,chats:state.chats,projects:state.projects,activeProject:state.activeProject,sidebar:state.sidebar,active:state.active,theme:state.theme,inspector:state.inspector,presets});
+const workspaceSnapshot=()=>structuredClone({parameterPolicyVersion:1,profile:state.profile,profiles:state.profiles,chats:state.chats.map(chat=>{const task=generations.get(chat.id);return task&&!task.persistOutput?{...chat,messages:task.savedMessages}:chat;}),projects:state.projects,activeProject:state.activeProject,sidebar:state.sidebar,active:state.active,theme:state.theme,inspector:state.inspector,presets});
 const persistence=createWorkspacePersistence({initial:initialWorkspace,read:workspaceSnapshot,apply:data=>{
  const previous=new Map(state.chats.map(chat=>[chat.id,chat]));
  state.chats=data.chats.map(chat=>JSON.stringify(previous.get(chat.id))===JSON.stringify(chat)?previous.get(chat.id):chat);
@@ -82,7 +82,7 @@ function renameChat(id){
  });
  $('#modal-input').maxLength=200;
 }
-function storageStatusHTML(){const labels={saved:t('已保存到服务器'),pending:t('等待保存'),saving:t('正在保存'),error:t('保存失败 · 重试')};return `<button class="local-label storage-status ${storageStatus==='error'?'save-error':''}" id="storage-status" data-action="retry-save" title="${esc(storageMessage?localizeError(storageMessage):t('对话和连接配置保存在服务器'))}">${icon('shield')}${esc(labels[storageStatus])}</button>`;}
+function storageStatusHTML(){const labels={saved:t([...generations.values()].some(task=>!task.persistOutput)?'问题已保存到服务器':'已保存到服务器'),pending:t('等待保存'),saving:t('正在保存'),error:t('保存失败 · 重试')};return `<button class="local-label storage-status ${storageStatus==='error'?'save-error':''}" id="storage-status" data-action="retry-save" title="${esc(storageMessage?localizeError(storageMessage):t([...generations.values()].some(task=>!task.persistOutput)?'回复将在生成结束后保存':'对话和连接配置保存在服务器'))}">${icon('shield')}${esc(labels[storageStatus])}</button>`;}
 function projectChats(id=state.activeProject){return id==='*'?state.chats:state.chats.filter(c=>(c.projectId||'')===id);}
 function sidebarCount(id){const fresh=state.chats.filter(c=>!c._etag&&(id==='*'||(c.projectId||'')===id)).length;return (id==='*'?(state.listing?.total??0):(state.listing?.counts?.[id]??0))+fresh;}
 function projectNav(){
@@ -191,10 +191,11 @@ function topbar(){const titles={chat:current().title,models:t('模型库'),conne
 function renderPage(previous=conversationScroll?.snapshot()){const el=$('#main-page');if(!el)return;el.className=state.page==='chat'?'chat-page':'page';if(state.page==='chat')el.innerHTML=chatPage();else if(state.page==='connection')el.innerHTML=connectionPage();else if(state.page==='models')el.innerHTML=modelsPage();else if(state.page==='logs')el.innerHTML=logsPage();else el.innerHTML=settingsPage();bindPage();bindConversationScroll(previous);}
 function chatPage(){return ui`<div class="conversation" id="conversation" data-chat="${current().id}">${current().messages.length?`<div class="message-list" id="messages">${current().messages.map(messageHTML).join('')}</div>`:welcome()}</div><div class="composer-wrap"><div id="thinking-slot">${thinkingDockHTML()}</div><div class="composer">${state.attachments.length?`<div class="attachment-line" style="padding:10px 14px 0">${state.attachments.map((a,i)=>ui`<span class="attachment-chip">${a.type==='image'?`<img src="${a.data}" alt="">`:icon('file')}<span class="truncate">${esc(a.name)}</span><button class="icon-btn" data-remove-attachment="${i}" aria-label="移除附件">${icon('close')}</button></span>`).join('')}</div>`:''}<textarea id="prompt" aria-label="消息" placeholder="输入消息…" rows="2">${esc(state.draft)}</textarea><div class="composer-tools">${ib(t('添加图片或文本附件'),'attach','paperclip')}<span class="small muted">${state.model?esc(modelName(state.model)):t('尚未选择模型')}</span><span class="grow"></span>${state.preview?t('<span class="badge">演示模式</span>'):''}<span class="small muted desktop-col">Enter 发送</span><button class="send-btn" id="send" aria-label="${state.streaming?t('停止生成'):t('发送消息')}" data-action="${state.streaming?'stop':'send'}" ${!state.streaming&&(!state.connected||!state.model)?'disabled':''}>${icon(state.streaming?'stop':'send')}</button></div></div>${metricsHTML()}<div class="composer-foot"><span>${state.streaming?t('正在生成'):t('Shift + Enter 换行')}<span id="draft-size"></span></span><span class="hint-right">${icon('shield')} ${state.profile.mode==='direct'?t('直连'):t('转发')}</span></div></div>`;}
 function welcome(){return ui`<section class="welcome"><div class="welcome-logo">${logo()}</div><h1>新对话</h1><div class="welcome-actions" style="margin-top:24px">${button(state.connected?t('选择模型'):t('添加连接'),state.connected?'pick-model':'connect-page','link','primary')}${button(t('模型库'),'models-page','box')}</div></section>`;}
-function inlineMD(text){return esc(text).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');}
+function inlineMD(text){return String(text).split(/`([^`]+)`/g).map((part,index)=>index%2?`<code>${esc(part)}</code>`:esc(part).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')).join('');}
 function markdown(text){const chunks=String(text||'').split(/```([^\n]*)\n([\s\S]*?)(?:```|$)/g);return chunks.map((s,i)=>{if(i%3===1)return '';if(i%3===2)return `<pre><code>${esc(s)}</code></pre>`;return s.split('\n').map(line=>{if(/^#{1,6}\s/.test(line))return `<h3>${inlineMD(line.replace(/^#+\s/,''))}</h3>`;if(/^>\s/.test(line))return `<blockquote>${inlineMD(line.slice(2))}</blockquote>`;if(/^[-*]\s/.test(line))return `<div style="padding-left:14px">• ${inlineMD(line.slice(2))}</div>`;return line?`<p>${inlineMD(line)}</p>`:'';}).join('');}).join('');}
 function contentText(m){return typeof m.content==='string'?m.content:(m.content||[]).filter(p=>p.type==='text').map(p=>p.text).join('\n');}
-function messageHTML(m,index){return `<article class="message ${m.role==='user'?'user-message':''} ${m.error?'error':''}" id="msg-${m.id}"><div class="message-head"><span class="avatar ${m.role==='assistant'?'assistant':''}">${m.role==='user'?t('你'):icon(m.role==='tool'?'code':'bolt')}</span><span>${m.role==='user'?t('你'):m.role==='tool'?t('工具结果'):esc(m.model?modelName(m.model):'Assistant')}</span>${m.status==='stopped'?t('<span class="badge">已停止</span>'):''}</div>${m.reasoning?`<details class="reasoning" data-reasoning-id="${m.id}" ${m.reasoningOpen?'open':''}><summary><span>${m.thinking?t('思考过程 · 正在接收'):t('思考过程')}</span></summary><pre></pre></details>`:''}<div class="message-content ${state.streaming&&index===current().messages.length-1?'cursor':''}">${markdown(contentText(m))}${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>/^data:image\//.test(p.image_url.url)?ui`<img src="${esc(p.image_url.url)}" alt="上传的图片">`:'').join(''):''}${m.tool_calls?.length?ui`<p class="muted small">工具调用</p>${m.tool_calls.map(t=>`<pre><code>${esc(t.function?.name)}\n${esc(t.function?.arguments)}</code></pre>`).join('')}${button(t('填写工具执行结果'),'tool-result','code')}`:''}</div>${completionNotice(m)}<div class="message-meta">${ib(t('复制消息'),'copy-message:'+m.id,'copy')}${m.role==='user'?ib(t('编辑并重新生成'),'edit-message:'+m.id,'edit'):''}${m.role==='assistant'&&!m.error?ib(t('从这里重新生成'),'regenerate:'+m.id,'refresh'):''}${m.error?button(t('重试'),'retry','refresh'):''}${m.ms?`<span>${(m.ms/1000).toFixed(1)} s</span>`:''}${m.role==='assistant'?ui`<span class="received-label">已接收 ${receptionLabel(m)}</span><span class="received-chars">${receptionStats(m).chars.toLocaleString()} 字符</span>`:''}</div></article>`;}
+function messageBodyHTML(m){return `${markdown(contentText(m))}${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>/^data:image\//.test(p.image_url.url)?ui`<img src="${esc(p.image_url.url)}" alt="上传的图片">`:'').join(''):''}${m.tool_calls?.length?ui`<p class="muted small">工具调用</p>${m.tool_calls.map(t=>`<pre><code>${esc(t.function?.name)}\n${esc(t.function?.arguments)}</code></pre>`).join('')}${button(t('填写工具执行结果'),'tool-result','code')}`:''}`;}
+function messageHTML(m,index){return `<article class="message ${m.role==='user'?'user-message':''} ${m.error?'error':''}" id="msg-${m.id}"><div class="message-head"><span class="avatar ${m.role==='assistant'?'assistant':''}">${m.role==='user'?t('你'):icon(m.role==='tool'?'code':'bolt')}</span><span>${m.role==='user'?t('你'):m.role==='tool'?t('工具结果'):esc(m.model?modelName(m.model):'Assistant')}</span>${m.status==='stopped'?t('<span class="badge">已停止</span>'):''}</div>${m.reasoning?`<details class="reasoning" data-reasoning-id="${m.id}" ${m.reasoningOpen?'open':''}><summary><span>${m.thinking?t('思考过程 · 正在接收'):t('思考过程')}</span></summary><pre></pre></details>`:''}<div class="message-content ${state.streaming&&index===current().messages.length-1?'cursor':''}">${messageBodyHTML(m)}</div>${completionNotice(m)}<div class="message-meta">${ib(t('复制消息'),'copy-message:'+m.id,'copy')}${m.role==='user'?ib(t('编辑并重新生成'),'edit-message:'+m.id,'edit'):''}${m.role==='assistant'&&!m.error?ib(t('从这里重新生成'),'regenerate:'+m.id,'refresh'):''}${m.error?button(t('重试'),'retry','refresh'):''}${m.ms?`<span>${(m.ms/1000).toFixed(1)} s</span>`:''}${m.role==='assistant'?ui`<span class="received-label">已接收 ${receptionLabel(m)}</span><span class="received-chars">${receptionStats(m).chars.toLocaleString()} 字符</span>`:''}</div></article>`;}
 function parameterValue(name){if(!configurableParams.includes(name)||state.params['override_'+name]||Object.hasOwn(hostLoadConfig(),name))return state.params[name];return '';}
 function parameterMode(name){if(!configurableParams.includes(name))return '';const enabled=state.params['override_'+name];return `<button type="button" class="param-mode ${enabled?'overridden':''}" data-override="${name}" aria-pressed="${!!enabled}">${enabled?t('恢复默认'):Object.hasOwn(hostLoadConfig(),name)?t('自定义'):t('自定义')}</button>`;}
 const rangeField=(name,title,min,max,step,hint='')=>ui`<div class="field"><div class="field-head"><label for="p-${name}">${title}</label><input type="number" id="p-${name}" data-param="${name}" min="${min}" max="${max}" step="${step}" value="${parameterValue(name)}" placeholder="默认" ${!state.params['override_'+name]?'disabled':''}></div>${parameterMode(name)}<input aria-label="${title} 滑杆" type="range" data-range="${name}" min="${min}" max="${max}" step="${step}" value="${state.params[name]}" ${!state.params['override_'+name]?'disabled':''}><div class="range-labels"><span>${min}</span><span>${max}</span></div></div>`;
@@ -354,8 +355,8 @@ async function send({regenerateMessages=null}={}){
  }
  let payload;try{payload=buildPayload(chat.messages);}catch(error){return toast(error.message);}
  const assistant={id:uid(),role:'assistant',content:'',model:state.model,status:'pending',created:Date.now(),startedAt:Date.now(),receivedEvents:0,receivedBytes:0,requestOutputLimit:payload.max_tokens||payload.max_completion_tokens||null};
- const task={chat,assistant,profile:{...state.profile},key:apiKey,preview:state.preview,controller:new AbortController()};
- chat.params={...state.params};chat.messages.push(assistant);generations.set(chat.id,task);
+ const task={chat,assistant,profile:{...state.profile},key:apiKey,preview:state.preview,controller:new AbortController(),persistOutput:false};
+ chat.params={...state.params};chat.messages.push(assistant);task.savedMessages=structuredClone(chat.messages);generations.set(chat.id,task);
  state.attachments=[];state.draft='';chatDrafts.delete(chat.id);
  const prompt=$('#prompt');if(prompt){prompt.value='';prompt.style.height='';}
  const start=performance.now();reconcileConversation();updateSendUI();renderThinkingDock();conversationScroll?.scrollToResponse(assistant.id);save();
@@ -364,7 +365,7 @@ async function send({regenerateMessages=null}={}){
    const reply=t('演示消息。');
    for(const part of reply.match(/.{1,8}|\n/g)||[]){
     if(task.controller.signal.aborted)throw new DOMException('Stopped','AbortError');
-    assistant.content+=part;assistant.receivedEvents++;assistant.lastActivityAt=Date.now();addReceivedText(assistant,part);updateAssistant(assistant,false,chat);save();await new Promise(r=>setTimeout(r,35));
+    assistant.content+=part;assistant.receivedEvents++;assistant.lastActivityAt=Date.now();addReceivedText(assistant,part);updateAssistant(assistant,false,chat);await new Promise(r=>setTimeout(r,35));
    }
   }else{
    if(!(await flushSave()))throw new Error(t('对话尚未保存，请先重试保存'));
@@ -386,7 +387,7 @@ async function send({regenerateMessages=null}={}){
   if(error.name==='AbortError'){assistant.status='stopped';if(!assistant.content&&!assistant.reasoning)assistant.content=t('生成已停止。');}
   else{const partial=!!assistant.content||!!assistant.reasoning||!!assistant.tool_calls?.length;assistant.interrupted=partial;assistant.error=!partial;assistant.status=partial?'interrupted':'error';assistant.errorInfo=error.message;if(!partial)assistant.content=error.message;}
  }finally{
-  assistant.ms=Math.round(performance.now()-start);assistant.thinking=false;collapseThinking(assistant,chat);save();await flushSave();
+  assistant.finishedAt=Date.now();assistant.ms=Math.round(performance.now()-start);assistant.thinking=false;task.persistOutput=true;save();await flushSave();
   generations.delete(chat.id);refreshGenerationIndicators();
   if(state.active===chat.id&&state.page==='chat'){updateAssistant(assistant,true,chat);updateSendUI();renderThinkingDock();}
  }
@@ -394,12 +395,10 @@ async function send({regenerateMessages=null}={}){
 async function readSSE(response,assistant,chat){
  const reader=response.body.getReader(),decoder=new TextDecoder(),parser=createThinkingParser();let buffer='',sawDone=false;const tools=new Map();let renderAt=0;
  const acceptText=(content,reasoning,thinking)=>{
-  const wasThinking=assistant.thinking;
   if(content)assistant.content+=content;
   if(reasoning){assistant.reasoning=(assistant.reasoning||'')+reasoning;assistant.reasoningPreview=((assistant.reasoningPreview||'')+reasoning).slice(-240);}
   addReceivedText(assistant,content+reasoning);
   assistant.thinking=thinking||!!assistant.reasoning&&!assistant.content;
-  if(wasThinking&&!assistant.thinking)collapseThinking(assistant,chat);
  };
  const frame=block=>{
   const data=block.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!data)return;if(data.trim()==='[DONE]'){sawDone=true;return;}
@@ -410,7 +409,7 @@ async function readSSE(response,assistant,chat){
   const d=event.choices?.[0]?.delta||event.choices?.[0]?.message||{},fields=apiDeltaText(d),parsed=parser.push(fields.content);
   acceptText(parsed.content,fields.reasoning+parsed.reasoning,parsed.thinking);
   if(d.tool_calls)for(const t of d.tool_calls){const index=t.index??0;const old=tools.get(index)||{id:'',type:'function',function:{name:'',arguments:''}};if(t.id)old.id=t.id;if(t.function?.name)old.function.name+=t.function.name;if(t.function?.arguments){old.function.arguments+=t.function.arguments;addReceivedText(assistant,t.function.arguments);}tools.set(index,old);}if(tools.size)assistant.tool_calls=[...tools.values()];
-  if(performance.now()-renderAt>180){updateAssistant(assistant,false,chat);save();renderAt=performance.now();}
+  if(performance.now()-renderAt>180){updateAssistant(assistant,false,chat);renderAt=performance.now();}
  };
  try{while(true){const{value,done}=await reader.read();if(value?.byteLength){assistant.receivedBytes=(assistant.receivedBytes||0)+value.byteLength;assistant.lastActivityAt=Date.now();}buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});buffer=buffer.replace(/\r\n/g,'\n');let end;while((end=buffer.indexOf('\n\n'))>=0){frame(buffer.slice(0,end));buffer=buffer.slice(end+2);}if(sawDone){await reader.cancel();break;}if(done){if(buffer.trim())frame(buffer);break;}}}
  finally{const tail=parser.push('',{final:true});acceptText(tail.content,tail.reasoning,tail.thinking);reader.releaseLock();updateAssistant(assistant,false,chat);}
@@ -438,31 +437,52 @@ function populateReasoning(detail,m){
  if(!pre.firstChild||length>text.length){pre.textContent=text;}else if(length<text.length){pre.firstChild.appendData(text.slice(length));}
  pre.dataset.renderedLength=String(text.length);if(m.reasoningScroll&&length===0)pre.scrollTop=m.reasoningScroll;
 }
-function collapseThinking(m,chat=current()){
- m.reasoningOpen=false;if(state.active!==chat.id)return;const detail=$(`[data-reasoning-id="${m.id}"]`);if(detail){detail.open=false;const pre=$('pre',detail);pre.replaceChildren();pre.dataset.renderedLength='0';}
+function patchMessageHTML(target,html){
+ if(target._renderedHTML===html)return;
+ const template=document.createElement('template');template.innerHTML=html;
+ const patch=(parent,next)=>{
+  for(let i=0;i<next.childNodes.length;i++){
+   const source=next.childNodes[i],node=parent.childNodes[i];
+   if(!node){parent.append(source.cloneNode(true));continue;}
+   if(node.isEqualNode(source))continue;
+   if(node.nodeType!==source.nodeType||node.nodeName!==source.nodeName){node.replaceWith(source.cloneNode(true));continue;}
+   if(node.nodeType===Node.TEXT_NODE){if(source.data.startsWith(node.data))node.appendData(source.data.slice(node.data.length));else node.data=source.data;continue;}
+   if(node.nodeType===Node.ELEMENT_NODE){
+    for(const attr of [...node.attributes])if(!source.hasAttribute(attr.name))node.removeAttribute(attr.name);
+    for(const attr of source.attributes)if(node.getAttribute(attr.name)!==attr.value)node.setAttribute(attr.name,attr.value);
+    patch(node,source);
+   }
+  }
+  while(parent.childNodes.length>next.childNodes.length)parent.lastChild.remove();
+ };
+ patch(target,template.content);target._renderedHTML=html;
 }
 function updateAssistant(m,final=false,chat=current()){
  if(state.active!==chat.id||state.page!=='chat')return;
  const el=$('#msg-'+m.id);if(!el){renderMetrics();renderThinkingDock();return;}
- const follow=conversationScroll?.following;
+ const reading=conversationScroll?.snapshot(),follow=reading?.following;
  let details=$('.reasoning',el);
  if(m.reasoning&&!details){details=document.createElement('details');details.className='reasoning';details.dataset.reasoningId=m.id;details.innerHTML=t('<summary><span>思考过程</span></summary><pre></pre>');details.open=!!m.reasoningOpen;el.insertBefore(details,$('.message-content',el));}
  if(details){const span=$('summary span',details);const title=m.thinking?t('思考过程 · 正在接收'):t('思考过程');if(span.textContent!==title)span.textContent=title;if(details.open){const pre=$('pre',details),atEnd=pre.scrollHeight-pre.scrollTop-pre.clientHeight<30,scroll=pre.scrollTop;populateReasoning(details,m);pre.scrollTop=atEnd?pre.scrollHeight:scroll;}}
  const content=$('.message-content',el);
+ content.classList.remove('streaming-text');content.classList.toggle('cursor',!final&&!!m.content);
+ patchMessageHTML(content,messageBodyHTML(m));
+ if(!final&&m.content){
+  let tail=content.lastChild;while(tail?.lastChild)tail=tail.lastChild;
+  if(tail?.nodeType===Node.TEXT_NODE){
+   const range=document.createRange();range.setStart(tail,tail.length);range.collapse(true);
+   const caret=range.getClientRects()[0],bounds=content.getBoundingClientRect();
+   if(caret){content.style.setProperty('--cursor-x',Math.max(0,caret.right-bounds.left)+'px');content.style.setProperty('--cursor-y',Math.max(0,Math.min(content.clientHeight-16,caret.top-bounds.top))+'px');}
+  }
+ }
  if(!final){
-  content.classList.add('streaming-text');content.classList.toggle('cursor',!!m.content);
-  const length=Number(content.dataset.renderedLength||0),text=m.content||'';
-  if(!content.firstChild||content.firstChild.nodeType!==Node.TEXT_NODE||length>text.length)content.textContent=text;
-  else if(length<text.length)content.firstChild.appendData(text.slice(length));
-  content.dataset.renderedLength=String(text.length);
   const received=$('.received-label',el),chars=$('.received-chars',el);if(received)received.textContent=t('已接收 ')+receptionLabel(m);if(chars)chars.textContent=receptionStats(m).chars.toLocaleString()+t(' 字符');
  }else{
   const holder=document.createElement('div');holder.innerHTML=messageHTML(m,current().messages.length-1);const fresh=holder.firstElementChild;
-  content.className=$('.message-content',fresh).className;content.innerHTML=$('.message-content',fresh).innerHTML;
   $('.message-head',el).innerHTML=$('.message-head',fresh).innerHTML;$('.message-meta',el).innerHTML=$('.message-meta',fresh).innerHTML;
   $('.completion-notice',el)?.remove();const notice=$('.completion-notice',fresh);if(notice)el.insertBefore(notice,$('.message-meta',el));
  }
- conversationScroll?.updateSpace();renderMetrics();renderThinkingDock();if(follow)scrollBottom();
+ renderMetrics();renderThinkingDock();conversationScroll?.updateSpace();if(follow)scrollBottom();else if(reading)conversationScroll?.restorePosition(reading.top);
 }
 
 function bindConversationScroll(previous){
@@ -502,7 +522,7 @@ function bindConversationScroll(previous){
  c.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select,[contenteditable]'))return;if(['ArrowUp','PageUp','Home'].includes(e.key)||(e.key===' '&&e.shiftKey))onIntent(-1);else if(['ArrowDown','PageDown','End',' '].includes(e.key))onIntent(1);});
  c.addEventListener('scroll',()=>{const top=c.scrollTop;if(top!==lastTop)following=top>lastTop&&atBottom();lastTop=top;},{passive:true});
  observer.observe(c);updateSpace();
- conversationScroll={get following(){return following;},snapshot:()=>({chat:c.dataset.chat,top:c.scrollTop,following,anchorId}),scrollToBottom:()=>scrollTo(c.scrollHeight),scrollToResponse,updateSpace,destroy:()=>observer.disconnect()};
+ conversationScroll={element:c,restorePosition:top=>{if(Math.abs(c.scrollTop-top)>.5)scrollTo(top);},get following(){return following;},snapshot:()=>({chat:c.dataset.chat,top:c.scrollTop,following,anchorId}),scrollToBottom:()=>scrollTo(c.scrollHeight),scrollToResponse,updateSpace,destroy:()=>observer.disconnect()};
  if(sameChat)scrollTo(previous.top);else scrollToResponse(anchorId);
 }
 function scrollBottom(){conversationScroll?.scrollToBottom();}
@@ -521,7 +541,7 @@ $('#file-input').onchange=async e=>{const files=[...e.target.files];try{if(state
 $('#import-input').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>20*1024**2)throw new Error(t('备份文件过大'));const data=JSON.parse(await file.text());if(data.format!=='lumen-studio'||!Array.isArray(data.chats)||!data.chats.every(c=>typeof c.title==='string'&&Array.isArray(c.messages)))throw new Error(t('不是有效的 Lumen Studio 会话备份'));const projectMap=new Map(),importedProjects=(Array.isArray(data.projects)?data.projects:[]).filter(p=>typeof p.id==='string'&&typeof p.name==='string'&&p.name.trim()).map(p=>{const id=uid();projectMap.set(p.id,id);return {id,name:p.name.slice(0,100),created:Number(p.created)||Date.now(),path:'projects/'+id};});const chats=data.chats.map(c=>({id:uid(),projectId:projectMap.get(c.projectId)||(state.activeProject==='*'?'':state.activeProject),title:c.title.slice(0,100),created:Number(c.created)||Date.now(),model:typeof c.model==='string'?c.model:'',params:{...defaults,...Object.fromEntries(Object.entries(c.params||{}).filter(([k])=>k in defaults))},messages:c.messages.filter(m=>['user','assistant','tool','system'].includes(m.role)).map(m=>({...m,id:uid(),content:typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text'&&typeof p.text==='string'||p.type==='image_url'&&/^data:image\/(?:png|jpeg|webp|gif);base64,/.test(p.image_url?.url||'')):''}))}));state.projects.push(...importedProjects);state.chats.unshift(...chats);if(chats.length){state.active=chats[0].id;state.activeProject=chats[0].projectId||'';}state.params={...defaults,...current().params};save();go('chat');toast(ui`已导入 ${chats.length} 个对话`);}catch(error){toast(error.message);}finally{e.target.value='';}};
 function startDemo(){if(state.streaming)return toast(t('请先停止生成'));state.preview=true;state.connected=true;state.native=false;state.latency=0;state.models=[{id:'demo/local-model',name:t('界面演示模型'),type:'llm',params:'—',loaded:false,native:false}];state.model='demo/local-model';state.inspector=true;go('chat');toast(t('已进入演示模式'));}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();$('#shell')?.classList.remove('show-sidebar','show-inspector');}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();$('[data-action="new-chat"]')?.click();}if(e.key==='Tab'&&$('.modal')){const items=$$('button,input,textarea,select,a[href]',$('.modal')).filter(el=>!el.disabled&&el.offsetParent!==null);if(e.shiftKey&&document.activeElement===items[0]){e.preventDefault();items.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===items.at(-1)){e.preventDefault();items[0].focus();}}});
-window.addEventListener('beforeunload',event=>{for(const task of generations.values()){task.controller.abort();const m=task.assistant;if(m.status==='pending'){m.status='stopped';m.thinking=false;save();}}persistence.flush({keepalive:true});if(persistence.dirty){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{for(const task of generations.values()){task.persistOutput=true;task.controller.abort();const m=task.assistant;if(m.status==='pending'){m.status='stopped';m.thinking=false;save();}}persistence.flush({keepalive:true});if(persistence.dirty){event.preventDefault();event.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistence.flush({keepalive:true});});
 
 function modelIdentity(){try{return state.connected&&state.model&&!state.preview?JSON.stringify([normalizeBase(state.profile.baseUrl),state.model]):'';}catch{return '';}}
@@ -532,7 +552,7 @@ function sharedBanner(){
 }
 function renderSharedBanner(){const el=$('#shared-config-status');if(el)el.outerHTML=sharedBanner();}
 async function configRequest(method='GET',data){const source=normalizeBase(state.profile.baseUrl),model=state.model;const response=await fetch('/api/model-config'+(method==='GET'?'?'+new URLSearchParams({source,model}):''),{method,headers:{'Content-Type':'application/json'},body:method==='GET'?undefined:JSON.stringify({source,model,...data}),signal:AbortSignal.timeout(10000)});let result;try{result=await response.json();}catch{throw new Error(t('共享配置不可用，请重启服务'));}if(!response.ok&&response.status!==409)throw new Error(localizeError(result.error)||t('无法访问共享配置服务'));return {status:response.status,...result};}
-function applySharedRecord(record){shared.record=record;const effective={...defaults,...hostLoadConfig(),...record.params,...shared.dirty};shared.effective={...effective};state.params=effective;current().params={...effective};save();syncParameterControls();renderSharedBanner();renderMetrics();}
+function applySharedRecord(record){shared.record=record;const effective={...defaults,...hostLoadConfig(),...record.params,...shared.dirty};shared.effective={...effective};state.params=effective;const changed=JSON.stringify(current().params)!==JSON.stringify(effective);current().params={...effective};if(changed)save();syncParameterControls();renderSharedBanner();renderMetrics();}
 function syncParameterControls(){for(const el of $$('[data-param]')){const value=state.params[el.dataset.param];if(document.activeElement===el)continue;if(el.type==='checkbox')el.checked=!!value;else el.value=el.type==='number'?parameterValue(el.dataset.param):value??'';if(configurableParams.includes(el.dataset.param))el.disabled=!state.params['override_'+el.dataset.param];}for(const el of $$('[data-range]'))if(document.activeElement!==el){el.value=state.params[el.dataset.range];el.disabled=!state.params['override_'+el.dataset.range];}for(const b of $$('[data-override]')){const enabled=!!state.params['override_'+b.dataset.override];b.classList.toggle('overridden',enabled);b.setAttribute('aria-pressed',String(enabled));b.textContent=enabled?t('恢复默认'):Object.hasOwn(hostLoadConfig(),b.dataset.override)?t('自定义'):t('自定义');}}
 async function activateModelConfig(force=false){
  const id=modelIdentity();if(!id){renderSharedBanner();return false;}
@@ -566,6 +586,11 @@ function receptionLabel(message){const stats=receptionStats(message);return `${s
 function conversationReceived(){let tokens=0,exact=true;for(const message of current().messages)if(message.role==='assistant'){const stats=receptionStats(message);tokens+=stats.tokens;exact=exact&&stats.exact;}return `${exact?'':'≈ '}${tokens.toLocaleString()} tokens`;}
 function thinkingDockHTML(){const m=latestAssistant();if(!m||(!state.streaming&&!m.reasoning&&!m.interrupted&&m.status!=='truncated'))return '';return ui`<section class="thinking-dock" data-message="${m.id}" aria-label="模型接收状态"><div class="row between"><span class="row"><span class="activity-dot ${state.streaming?'active':''}"></span><strong class="thinking-status"></strong><small class="thinking-elapsed muted"></small></span><button class="thinking-expand" data-action="show-thinking">展开思考 ${icon('chevron')}</button></div><div class="thinking-preview"></div><div class="thinking-reception muted"></div></section>`;}
 function renderThinkingDock(){
+ const scroll=conversationScroll,reading=scroll?.element===$('#conversation')?scroll.snapshot():null;
+ drawThinkingDock();
+ if(reading){scroll.updateSpace();if(reading.following)scroll.scrollToBottom();else scroll.restorePosition(reading.top);}
+}
+function drawThinkingDock(){
  const slot=$('#thinking-slot');if(!slot)return;const m=latestAssistant(),show=m&&(state.streaming||m.reasoning||m.interrupted||m.status==='truncated');if(!show){slot.innerHTML='';return;}
  if($('.thinking-dock',slot)?.dataset.message!==m.id)slot.innerHTML=thinkingDockHTML();const dock=$('.thinking-dock',slot);if(!dock)return;
  const live=state.streaming&&m.status==='pending';const status=m.status==='truncated'?t('输出达到接口限制'):m.status==='interrupted'?t('连接中断 · 内容已保留'):m.status==='stopped'?t('已停止生成'):live?(m.tool_calls?.length?t('正在接收工具调用'):m.thinking||m.reasoning&&!m.content?t('模型正在思考'):m.content?t('正在接收回答'):m.receivedBytes?t('接收中'):m.connectedAt?t('等待输出'):t('等待响应')):m.status==='reasoning_only'?t('仅返回思考'):t('思考已完成');
