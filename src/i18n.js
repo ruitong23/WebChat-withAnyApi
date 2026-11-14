@@ -1,6 +1,8 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '候选来源：Google 官方模型目录。点击连接可更新目录。':'Candidates come from Google’s official model catalog. Click Connect to update it.',
+  '官方目录暂时无法更新，正在使用缓存或备用名单；可在高级选项添加模型 ID。':'The official catalog could not be updated. Cached or bundled candidates are in use; add another model ID under Advanced.',
   '选择聊天模型':'Choose a chat model',
   '个候选模型通过连接检查。':'candidate models passed the connection check.',
   '请选择模型':'Select a model',

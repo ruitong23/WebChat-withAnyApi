@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {relay} from '../src/relay.js';
+import {relay as appRelay} from '../src/relay.js';
+const relay=(request,options)=>appRelay(request,{catalog:async()=>({models:[],source:'bundled'}),...options});
 import {vertexBase,vertexModels,isVertexBase,vertexPayload,vertexModel} from '../src/vertex-express.js';
 const request=(path,payload,extra={})=>new Request('https://studio.test/api/relay',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://studio.test'},body:JSON.stringify({baseUrl:vertexBase,path,apiKey:'test-vertex-key',payload,...extra})});
 const body=(text,finishReason='STOP',usageMetadata)=>({candidates:[{index:0,content:{role:'model',parts:[{text}]},finishReason}],usageMetadata});
@@ -35,6 +36,15 @@ test('an unavailable default or requested model does not block other checked can
  const result=await relay(request('/v1/models',null,{vertexModel:'gemini-2.5-flash'}),{fetch:async url=>url.includes('gemini-2.5-flash:')||url.includes(vertexModels[0]+':')?Response.json({error:{message:'Publisher model not found'}},{status:404}):Response.json({totalTokens:1})});
  assert.equal(result.status,200);const data=await result.json();assert.equal(data.requestedModel,undefined);assert.deepEqual(data.data.map(m=>m.id),vertexModels.slice(1));assert.deepEqual(data.unavailableModels,['gemini-2.5-flash',vertexModels[0]]);
  assert(!vertexModels.includes('gemini-2.5-flash'));
+});
+test('discovery includes current Gemini 4 and 3.8 models when only new models pass the account check',async()=>{
+ const available=['gemini-4-argon','gemini-3.8-flash'];
+ const result=await relay(request('/v1/models'),{fetch:async url=>available.some(id=>url.includes('/'+id+':countTokens'))?Response.json({totalTokens:1}):Response.json({error:{message:'Publisher model not found in this region'}},{status:404})});
+ assert.equal(result.status,200);assert.deepEqual((await result.json()).data.map(m=>m.id),available);
+});
+test('an unseen model fetched from the public catalog reaches account checks without editing the bundled array',async()=>{
+ const result=await relay(request('/v1/models'),{catalog:async()=>({models:['gemini-9-new'],source:'official',updatedAt:1}),fetch:async url=>url.includes('/gemini-9-new:')?Response.json({totalTokens:1}):Response.json({error:{message:'Not enabled'}},{status:404})});
+ const value=await result.json();assert.equal(result.status,200);assert.deepEqual(value.data.map(m=>m.id),['gemini-9-new']);assert.equal(value.catalogSource,'official');assert.equal(value.catalogUpdatedAt,1);
 });
 test('native SSE is delivered incrementally, handles split UTF-8/CRLF, thoughts, usage and completion',async()=>{
  let upstream;const source=new ReadableStream({start(c){upstream=c;}}),encoder=new TextEncoder();

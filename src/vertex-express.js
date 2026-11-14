@@ -1,8 +1,10 @@
 // Vertex AI Express uses native Gemini requests, not the AI Studio compatibility API.
+import {createVertexCatalog} from './vertex-catalog.js';
+const officialCatalog=createVertexCatalog();
 export const vertexBase='https://aiplatform.googleapis.com';
-// Candidate IDs are not an account model list. Discovery probes each candidate
-// and returns only successful checks; retired 2.5 models are not defaults.
-export const vertexModels=['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-3.5-flash','gemini-3-flash-preview','gemini-3.1-pro-preview'];
+// Offline fallback and compatibility aliases. New candidates are fetched from
+// Google's public lifecycle catalog before account-specific checks.
+export const vertexModels=['gemini-4-hydrogen','gemini-4-carbon','gemini-4-argon','gemini-3.8-flash','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.5-flash','gemini-3.1-flash-lite','gemini-3-flash-preview','gemini-3.1-pro-preview'];
 export const isVertexBase=raw=>{try{const u=new URL(raw);return u.origin===vertexBase&&['','/','/v1','/v1/','/v1beta1','/v1beta1/'].includes(u.pathname)&&!u.username&&!u.password&&!u.search&&!u.hash;}catch{return false;}};
 export function vertexModel(raw=vertexModels[0]){
  const id=String(raw||vertexModels[0]).replace(/^(?:publishers\/google\/models\/|google\/)/,'');
@@ -100,8 +102,10 @@ export async function vertexRelay(data,request,options={}){
  const probe=data.path==='/v1/models';
  if(!probe&&data.path!=='/v1/chat/completions')return json({error:{message:'Vertex Express 不支持此接口'}},400);
  if(probe){
-  const requested=data.vertexModel?vertexModel(data.vertexModel):null,models=[...new Set([...(requested?[requested]:[]),...vertexModels])];
   const signal=AbortSignal.any([request.signal,AbortSignal.timeout(18000)]);
+  const catalog=await(options.catalog?options.catalog({refresh:!!data.refreshCatalog}):officialCatalog.get({refresh:!!data.refreshCatalog}));
+  request.signal.throwIfAborted();
+  const requested=data.vertexModel?vertexModel(data.vertexModel):null,models=[...new Set([...(requested?[requested]:[]),...catalog.models.map(vertexModel),...vertexModels])];
   const results=await Promise.all(models.map(async model=>{
    try{
     const response=await fetcher(vertexBase+'/v1/publishers/google/models/'+model+':countTokens',{method:'POST',headers,body:JSON.stringify({contents:[{role:'user',parts:[{text:'Hello'}]}]}),signal,redirect:'manual'});
@@ -111,7 +115,7 @@ export async function vertexRelay(data,request,options={}){
   }));
   const available=results.filter(r=>r.ok);
   if(!available.length){const auth=results.find(r=>r.status===401||r.status===403),failure=auth||results[0];return json({error:{message:failure.message,kind:auth?'authentication':'model_unavailable'}},failure.status>=300&&failure.status<400?502:failure.status===200?502:failure.status);}
-  return json({data:available.map(({id})=>({id,object:'model',owned_by:'google',type:'llm'})),modelListSource:'verified_candidates',...(available.some(r=>r.id===requested)?{requestedModel:requested}:{}),unavailableModels:results.filter(r=>!r.ok).map(r=>r.id)});
+  return json({data:available.map(({id})=>({id,object:'model',owned_by:'google',type:'llm'})),modelListSource:'verified_candidates',catalogSource:catalog.source,catalogUpdatedAt:catalog.updatedAt,...(available.some(r=>r.id===requested)?{requestedModel:requested}:{}),unavailableModels:results.filter(r=>!r.ok).map(r=>r.id)});
  }
  const model=vertexModel(data.payload?.model),stream=data.payload?.stream===true;
  const url=vertexBase+'/v1/publishers/google/models/'+model+':'+(stream?'streamGenerateContent?alt=sse':'generateContent');

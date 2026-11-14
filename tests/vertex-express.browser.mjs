@@ -15,6 +15,7 @@ const push=(response,value)=>response.write('data: '+JSON.stringify(value)+'\n\n
 const mock=http.createServer(async(req,res)=>{
  let raw='';for await(const chunk of req)raw+=chunk;const payload=raw?JSON.parse(raw):null;
  requests.push({path:req.url,key:req.headers['x-goog-api-key'],authorization:req.headers.authorization,payload});
+ if(req.url==='/mock-public-catalog'){assert.equal(req.headers['x-goog-api-key'],undefined);res.setHeader('Content-Type','text/html');res.end('<table><tr><td>gemini-9-new</td><td>November 12, 2026</td><td>No retirement date announced</td></tr></table>');return;}
  if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'existing-model'}]}));return;}
  if(req.url.startsWith('/v1/publishers/google/models/')){
   if(req.headers['x-goog-api-key']!=='test-vertex-key'){res.writeHead(401,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'Invalid Express key'}}));return;}
@@ -26,7 +27,7 @@ const mock=http.createServer(async(req,res)=>{
 });await new Promise(r=>mock.listen(0,'127.0.0.1',r));const mockURL='http://127.0.0.1:'+mock.address().port;
 // Native calls go through the actual app relay and saved-key lookup, with only
 // the final Google network hop redirected to our local fake upstream.
-const preload=join(directory,'mock-vertex.mjs');await writeFile(preload,`const realFetch=globalThis.fetch;globalThis.fetch=(input,options)=>{const url=new URL(input);if(url.hostname==='aiplatform.googleapis.com')return realFetch(${JSON.stringify(mockURL)}+url.pathname+url.search,options);return realFetch(input,options);};`);
+const preload=join(directory,'mock-vertex.mjs');await writeFile(preload,`const realFetch=globalThis.fetch;globalThis.fetch=(input,options)=>{const url=new URL(input);if(url.hostname==='docs.cloud.google.com')return realFetch(${JSON.stringify(mockURL)}+'/mock-public-catalog',options);if(url.hostname==='aiplatform.googleapis.com')return realFetch(${JSON.stringify(mockURL)}+url.pathname+url.search,options);return realFetch(input,options);};`);
 const reserve=http.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));const url='http://127.0.0.1:'+port;
 const wait=async(check,label)=>{for(let i=0;i<300;i++){if(await check())return;await new Promise(r=>setTimeout(r,40));}throw new Error('Timeout: '+label+'\n'+output);};
 const record=async()=>(await(await fetch(url+'/api/workspace')).json());
@@ -48,7 +49,7 @@ try{
   await page.locator('#api-key').fill('test-wrong-key');await page.locator('[data-action="discover"]').click();await page.locator('.connection-result.fail').waitFor();assert.match(await page.locator('#connection-result').textContent(),/401/);assert.equal(streams.length,0);
   await page.locator('#api-key').fill('test-vertex-key');await page.locator('[data-action="discover"]').click();await connected();await wait(async()=>(await record()).data.profiles.some(p=>p.provider==='vertex'&&p.hasKey),'key save');const vertex=(await record()).data.profiles.find(p=>p.provider==='vertex');
   assert.equal((await disk()).data.keys[vertex.id],'test-vertex-key');assert.equal((await disk()).data.keys.old,'test-old-key');assert(!JSON.stringify(await record()).includes('test-vertex-key'));assert(requests.some(r=>r.path.endsWith(':countTokens')));assert.equal(streams.length,0);assert.match(await page.locator('#connection-result').textContent(),/候选|candidate/i);
-  assert.equal(await page.locator('#vertex-model-choice').inputValue(),'');assert.equal(await page.locator('#vertex-model-choice option:not([disabled])').count(),vertexModels.length-1);assert.equal(await page.locator('#vertex-model-choice option[value="'+vertexModels[0]+'"]').count(),0);await page.locator('#vertex-model-choice').selectOption(vertexModels[1]);
+  assert.equal(await page.locator('#vertex-model-choice').inputValue(),'');assert.equal(await page.locator('#vertex-model-choice option:not([disabled])').count(),vertexModels.length);assert.equal(await page.locator('#vertex-model-choice option[value="'+vertexModels[0]+'"]').count(),0);assert.equal(await page.locator('#vertex-model-choice option[value="gemini-9-new"]').count(),1);await page.locator('#vertex-model-choice').selectOption('gemini-9-new');
   await page.screenshot({path:join(qa,label+'-key-connected.png')});await go('chat');await page.locator('#prompt').fill('Continue my novel');await page.locator('#send').click();await wait(()=>streams.length===1,'native stream started');
   const sent=requests.find(r=>r.path.includes(':streamGenerateContent'));assert.equal(sent.key,'test-vertex-key');assert.equal(sent.authorization,undefined);assert.equal(sent.payload.contents[0].parts[0].text,'Original novel setting');assert.equal(sent.payload.contents[1].role,'model');assert.equal(sent.payload.generationConfig.maxOutputTokens,undefined);
   push(streams[0],{candidates:[{content:{parts:[{text:'Planning the next chapter.',thought:true}]}}]});push(streams[0],native('**Live Vertex reply**\n\nFirst paragraph.'));
