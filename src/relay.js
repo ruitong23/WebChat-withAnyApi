@@ -1,3 +1,6 @@
+import {vertexBase,isVertexBase,vertexRelay} from './vertex-express.js';
+export {vertexBase,isVertexBase};
+
 const allowedPaths = /^\/(?:v1\/(?:models|chat\/completions|embeddings)|api\/v[01]\/models(?:\/(?:load|unload|download(?:\/status\/[a-zA-Z0-9_-]+)?))?)$/;
 export function normalizeBase(raw) {
   const url = new URL(raw.trim());
@@ -38,6 +41,7 @@ export async function relay(request, options = {}) {
     if (!options.allowPrivate && isPrivate(target.hostname)) return json({error:{message:'无法连接此地址'}},400);
     const path = data.path;
     if (typeof path !== 'string' || !allowedPaths.test(path)) return json({error:{message:'此接口路径不在支持范围内'}},400);
+    if (isVertexBase(base)) return await vertexRelay(data,request,options);
     const get = path.endsWith('/models') || path.includes('/download/status/');
     const method = get ? 'GET' : 'POST';
     const headers = {'Content-Type':'application/json', 'Accept': path.endsWith('/completions') && data.payload?.stream ? 'text/event-stream' : 'application/json'};

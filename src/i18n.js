@@ -1,6 +1,26 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '只需输入 Vertex Express API Key，无需项目 ID 或地区。':'Just enter your Vertex Express API key. No project ID or region is needed.',
+  '模型 ID（可选）':'Model ID (optional)',
+  '留空使用默认模型；也可填写账号可用的 Gemini 模型 ID。':'Leave blank for the default model, or enter a Gemini model ID available to your account.',
+  '已验证 Vertex Express Key · 显示常用模型，实际可用性以账号权限为准。':'Vertex Express key verified. Common models are listed; availability depends on your account.',
+  '请输入有效的 Vertex Express API Key':'Enter a valid Vertex Express API key',
+  'Vertex Express 模型 ID 无效':'Invalid Vertex Express model ID',
+  'Vertex Express 图片必须为上传的图片':'Vertex Express requires uploaded images',
+  'Vertex Express 不支持此消息内容':'This message content is not supported by Vertex Express',
+  '工具参数必须为 JSON 对象':'Tool arguments must be a JSON object',
+  'Vertex Express 消息格式无效':'Invalid Vertex Express message format',
+  'Vertex Express 工具结果缺少对应调用':'Vertex Express tool result has no matching call',
+  'Vertex Express 历史签名格式无效':'Invalid Vertex Express history signature',
+  'Vertex Express 消息角色无效':'Invalid Vertex Express message role',
+  'Vertex Express 不支持参数：':'Unsupported Vertex Express parameter: ',
+  'Vertex Express 每次只支持一个回复':'Vertex Express supports one reply at a time',
+  'Vertex Express 请求失败':'Vertex Express request failed',
+  'Vertex Express 不支持此接口':'This endpoint is not supported by Vertex Express',
+  'Vertex Express 验证响应无效':'Invalid Vertex Express verification response',
+  'Vertex Express 流连接提前中断，已保留收到的内容':'Vertex Express stream ended early. Received content was kept.',
+  'Vertex Express 响应未包含完成状态':'Vertex Express response has no completion status',
   '选择接口类型':'Choose an API type',
   'OpenAI / 兼容接口':'OpenAI / compatible API',
   '连接 OpenAI、LM Studio 或其他兼容服务。':'Connect to OpenAI, LM Studio or another compatible service.',
@@ -457,7 +477,7 @@ export function createI18n(languages, fallback) {
   function localizeError(message) {
     if(typeof message!=='string'||language==='zh')return message;
     if(Object.hasOwn(english,message))return t(message);
-    for(const prefix of ['不支持的参数：','参数超出范围：','参数类型不正确：','额外参数不能覆盖 '])if(message.startsWith(prefix))return t(prefix)+message.slice(prefix.length);
+    for(const prefix of ['不支持的参数：','参数超出范围：','参数类型不正确：','额外参数不能覆盖 ','Vertex Express 不支持参数：'])if(message.startsWith(prefix))return t(prefix)+message.slice(prefix.length);
     return message;
   }
   return {language,locale,t,ui,localizeError};

@@ -10,7 +10,7 @@ Requires Node.js 20.3 or later. No application dependencies need to be installed
 
 1. Download and extract this repository, or clone it.
 2. On Windows, double-click **`start.bat`**. A CMD window opens and launches the website in your browser.
-3. Open **API connection** and click **New**. Choose **OpenAI / compatible API** to enter a base URL and key, or **Google Gemini** to use Google's prefilled official URL with your Gemini API key. Click **Connect**.
+3. Open **API connection** and click **New**. Choose **Vertex AI Express** to enter only your Express API key, **OpenAI / compatible API** for a custom base URL and key, or **Google Gemini (AI Studio)** for an AI Studio key. Click **Connect**.
 4. Select a discovered model and start chatting.
 
 Keep the CMD window open while using the website. Closing it stops the server. The default address is `http://127.0.0.1:4177`.
@@ -25,13 +25,17 @@ Then open the address shown in the terminal. A fresh installation creates its ow
 
 ## API compatibility
 
+**Vertex AI Express** uses [Google's native Express API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview) at `https://aiplatform.googleapis.com`, with `x-goog-api-key` authentication. No project ID, region, OAuth token or service-account JSON is needed. Connect checks the key with `countTokens` rather than generating a paid reply. The app lists common documented Express chat models, defaults to `gemini-2.5-flash`, and allows an optional model ID under **Advanced**. The list is a preset, not a claim that every listed model is enabled for your account. Model permissions and quota errors are shown when returned by Google.
+
+The Express adapter converts system prompts, multi-turn history, uploaded images, optional generation settings, and function tools into native Gemini requests. Native SSE and JSON responses are converted for the chat interface, preserving thoughts, token/cache usage, finish reasons, and signed tool-call history. Streaming replies are displayed as chunks arrive and saved when generation finishes, stops or is interrupted. Express requests use the website server relay, including when the key is kept only in page memory. AI Studio and Express keys belong to separate connection types.
+
 Google Gemini is supported through [Google's official OpenAI compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai) at `https://generativelanguage.googleapis.com/v1beta/openai/`. Model discovery and streaming chat use the same connection flow. The client fetches available models instead of hardcoding model names. Select a saved connection and click **Delete connection** to remove it and its saved key; existing conversations are kept.
 
 Compatibility depends on the API protocol and the features exposed by the server. This client does not support every API format or authenticate with every provider.
 
 | Capability | Support |
 | --- | --- |
-| Model discovery | `GET /v1/models`; the current connection flow requires a model list |
+| Model discovery | `GET /v1/models` for compatible APIs; Express verifies a key and shows a preset model list |
 | Chat | `POST /v1/chat/completions`, streaming SSE and non-streaming JSON |
 | Authentication | Optional `Authorization: Bearer <key>` |
 | Base URLs | HTTP/HTTPS, root URLs, `/v1` URLs, and reverse-proxy path prefixes |
@@ -52,7 +56,7 @@ Some APIs reject `stream_options.include_usage`; disable **Include usage** for t
 
 ### Current limits
 
-- No native OpenAI Responses API, Anthropic Messages API, Gemini `generateContent` adapter, or Azure-specific API-key/query-parameter adapter. Gemini uses Google's official OpenAI compatibility endpoint. Other compatible Chat Completions gateways may work if they expose the required endpoints.
+- No native OpenAI Responses API, Anthropic Messages API, standard Vertex project/region OAuth adapter, or Azure-specific API-key/query-parameter adapter. Vertex Express uses native Gemini generation; AI Studio uses Google's official OpenAI compatibility endpoint. Other compatible Chat Completions gateways may work if they expose the required endpoints.
 - No OAuth login, custom authentication headers, automatic agents/MCP execution, audio/video APIs, image generation, or PDF parsing.
 - Context-window and current load information are read from LM Studio's native API. Standard chat APIs often do not expose their active server settings.
 - Cache statistics display what the API reports; this client does not enable or control server-side caching.

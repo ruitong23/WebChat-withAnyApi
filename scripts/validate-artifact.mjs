@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 const root=new URL('../dist/',import.meta.url);
 const manifest=JSON.parse(await readFile(new URL('package.json',root),'utf8'));
 assert.equal(manifest.scripts.start,'node server/index.mjs');
-for(const path of ['server/index.mjs','server/relay.js','server/shared-store.mjs','server/workspace-store.mjs','server/workspace-public.mjs','public/app.js','public/relay.js','public/i18n.js','public/response-utils.js','public/workspace-client.js']){
+for(const path of ['server/index.mjs','server/relay.js','server/vertex-express.js','server/shared-store.mjs','server/workspace-store.mjs','server/workspace-public.mjs','public/app.js','public/relay.js','public/vertex-express.js','public/i18n.js','public/response-utils.js','public/workspace-client.js']){
  const file=fileURLToPath(new URL(path,root));await access(file);execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 for(const path of ['public/index.html','public/style.css','deploy/nginx.conf','deploy/lumen.service','README.md'])await access(new URL(path,root));
