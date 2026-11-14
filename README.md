@@ -25,7 +25,7 @@ Then open the address shown in the terminal. A fresh installation creates its ow
 
 ## API compatibility
 
-**Vertex AI Express** uses [Google's native Express API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview) at `https://aiplatform.googleapis.com`, with `x-goog-api-key` authentication. No project ID, region, OAuth token or service-account JSON is needed. Connect checks the key with `countTokens` rather than generating a paid reply. The app lists common documented Express chat models, defaults to `gemini-2.5-flash`, and allows an optional model ID under **Advanced**. The list is a preset, not a claim that every listed model is enabled for your account. Model permissions and quota errors are shown when returned by Google.
+**Vertex AI Express** uses [Google's native Express API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview) at `https://aiplatform.googleapis.com`, with `x-goog-api-key` authentication. No project ID, region, OAuth token or service-account JSON is needed. Connect checks the key with `countTokens` rather than generating a paid reply. The app checks common candidate model IDs with `countTokens` and lists only the successful checks. Select the chat model yourself after connecting; an unavailable candidate does not block other models. Add an optional model ID under **Advanced**. This is a checked candidate list, not the complete list of models enabled for your account. Model permissions and quota errors are shown when returned by Google.
 
 The Express adapter converts system prompts, multi-turn history, uploaded images, optional generation settings, and function tools into native Gemini requests. Native SSE and JSON responses are converted for the chat interface, preserving thoughts, token/cache usage, finish reasons, and signed tool-call history. Streaming replies are displayed as chunks arrive and saved when generation finishes, stops or is interrupted. Express requests use the website server relay, including when the key is kept only in page memory. AI Studio and Express keys belong to separate connection types.
 
@@ -35,7 +35,7 @@ Compatibility depends on the API protocol and the features exposed by the server
 
 | Capability | Support |
 | --- | --- |
-| Model discovery | `GET /v1/models` for compatible APIs; Express verifies a key and shows a preset model list |
+| Model discovery | `GET /v1/models` for compatible APIs; Express checks candidate model IDs and lists successful connection checks |
 | Chat | `POST /v1/chat/completions`, streaming SSE and non-streaming JSON |
 | Authentication | Optional `Authorization: Bearer <key>` |
 | Base URLs | HTTP/HTTPS, root URLs, `/v1` URLs, and reverse-proxy path prefixes |

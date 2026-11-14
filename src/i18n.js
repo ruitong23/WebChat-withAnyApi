@@ -1,6 +1,12 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '选择聊天模型':'Choose a chat model',
+  '个候选模型通过连接检查。':'candidate models passed the connection check.',
+  '请选择模型':'Select a model',
+  '个候选模型通过连接检查，请选择聊天模型。':'candidate models passed the connection check. Choose a chat model.',
+  '仅显示通过连接检查的候选模型，非账号完整模型列表。可在高级选项添加模型 ID。':'Only candidates that passed the connection check are shown, not a complete account model list. Add another model ID under Advanced.',
+  'Vertex Express 模型不可用（404）：请重新连接并选择通过检查的模型，或确认账号和地区权限。':'Vertex Express model unavailable (404): reconnect and choose a checked model, or check account and region access.',
   '只需输入 Vertex Express API Key，无需项目 ID 或地区。':'Just enter your Vertex Express API key. No project ID or region is needed.',
   '模型 ID（可选）':'Model ID (optional)',
   '留空使用默认模型；也可填写账号可用的 Gemini 模型 ID。':'Leave blank for the default model, or enter a Gemini model ID available to your account.',

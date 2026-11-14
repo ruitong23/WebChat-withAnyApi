@@ -1,6 +1,8 @@
 // Vertex AI Express uses native Gemini requests, not the AI Studio compatibility API.
 export const vertexBase='https://aiplatform.googleapis.com';
-export const vertexModels=['gemini-2.5-flash','gemini-2.5-pro','gemini-2.5-flash-lite','gemini-3-flash-preview','gemini-3.1-pro-preview'];
+// Candidate IDs are not an account model list. Discovery probes each candidate
+// and returns only successful checks; retired 2.5 models are not defaults.
+export const vertexModels=['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-3.5-flash','gemini-3-flash-preview','gemini-3.1-pro-preview'];
 export const isVertexBase=raw=>{try{const u=new URL(raw);return u.origin===vertexBase&&['','/','/v1','/v1/','/v1beta1','/v1beta1/'].includes(u.pathname)&&!u.username&&!u.password&&!u.search&&!u.hash;}catch{return false;}};
 export function vertexModel(raw=vertexModels[0]){
  const id=String(raw||vertexModels[0]).replace(/^(?:publishers\/google\/models\/|google\/)/,'');
@@ -97,15 +99,26 @@ export async function vertexRelay(data,request,options={}){
  const fetcher=options.fetch||fetch,headers={'Content-Type':'application/json','x-goog-api-key':key};
  const probe=data.path==='/v1/models';
  if(!probe&&data.path!=='/v1/chat/completions')return json({error:{message:'Vertex Express 不支持此接口'}},400);
- const model=vertexModel(probe?data.vertexModel:data.payload?.model),stream=!probe&&data.payload?.stream===true;
- const url=vertexBase+'/v1/publishers/google/models/'+model+':'+(probe?'countTokens':stream?'streamGenerateContent?alt=sse':'generateContent');
- const payload=probe?{contents:[{role:'user',parts:[{text:'Hello'}]}]}:vertexPayload(data.payload||{});
- const response=await fetcher(url,{method:'POST',headers:{...headers,Accept:stream?'text/event-stream':'application/json'},body:JSON.stringify(payload),signal:probe?AbortSignal.any([request.signal,AbortSignal.timeout(20000)]):request.signal,redirect:'manual'});
+ if(probe){
+  const requested=data.vertexModel?vertexModel(data.vertexModel):null,models=[...new Set([...(requested?[requested]:[]),...vertexModels])];
+  const signal=AbortSignal.any([request.signal,AbortSignal.timeout(18000)]);
+  const results=await Promise.all(models.map(async model=>{
+   try{
+    const response=await fetcher(vertexBase+'/v1/publishers/google/models/'+model+':countTokens',{method:'POST',headers,body:JSON.stringify({contents:[{role:'user',parts:[{text:'Hello'}]}]}),signal,redirect:'manual'});
+    let value;try{value=await response.json();}catch{value={};}
+    return {id:model,status:response.status,ok:response.ok&&typeof value.totalTokens==='number'&&!value.error,message:redact(value.error?.message||'Vertex Express 验证响应无效')};
+   }catch(error){if(request.signal.aborted)throw error;return {id:model,status:504,ok:false,message:redact(error.name==='TimeoutError'?'连接超时':error.message)};}
+  }));
+  const available=results.filter(r=>r.ok);
+  if(!available.length){const auth=results.find(r=>r.status===401||r.status===403),failure=auth||results[0];return json({error:{message:failure.message,kind:auth?'authentication':'model_unavailable'}},failure.status>=300&&failure.status<400?502:failure.status===200?502:failure.status);}
+  return json({data:available.map(({id})=>({id,object:'model',owned_by:'google',type:'llm'})),modelListSource:'verified_candidates',...(available.some(r=>r.id===requested)?{requestedModel:requested}:{}),unavailableModels:results.filter(r=>!r.ok).map(r=>r.id)});
+ }
+ const model=vertexModel(data.payload?.model),stream=data.payload?.stream===true;
+ const url=vertexBase+'/v1/publishers/google/models/'+model+':'+(stream?'streamGenerateContent?alt=sse':'generateContent');
+ const payload=vertexPayload(data.payload||{});
+ const response=await fetcher(url,{method:'POST',headers:{...headers,Accept:stream?'text/event-stream':'application/json'},body:JSON.stringify(payload),signal:request.signal,redirect:'manual'});
  if(!response.ok){let message='Vertex Express 请求失败';try{const value=await response.json();message=value.error?.message||value.message||message;}catch{}
   return json({error:{message:redact(message)}},response.status>=300&&response.status<400?502:response.status);
- }
- if(probe){const result=await response.json();if(result.error||typeof result.totalTokens!=='number')return json({error:{message:redact(result.error?.message||'Vertex Express 验证响应无效')}},502);
-  return json({data:[...new Set([model,...vertexModels])].map(id=>({id,object:'model',owned_by:'google',type:'llm'})),modelListSource:'preset'});
  }
  const state={offset:0,tools:0,finished:false};
  if(stream&&response.headers.get('content-type')?.includes('text/event-stream')){
