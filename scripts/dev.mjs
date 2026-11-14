@@ -14,7 +14,7 @@ const modelStore=createModelConfigStore(process.env.LUMEN_CONFIG_FILE||join(data
 const workspaceStore=createWorkspaceStore(process.env.LUMEN_WORKSPACE_FILE||join(dataDirectory,'workspace.json'));
 // Finish migration/recovery before announcing a healthy service.
 await workspaceStore.revision();
-const assets={'/':['index.html','text/html; charset=utf-8'],'/index.html':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/i18n.js':['i18n.js','text/javascript; charset=utf-8'],'/response-utils.js':['response-utils.js','text/javascript; charset=utf-8'],'/workspace-client.js':['workspace-client.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
+const assets={'/':['index.html','text/html; charset=utf-8'],'/index.html':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/relay.js':['relay.js','text/javascript; charset=utf-8'],'/i18n.js':['i18n.js','text/javascript; charset=utf-8'],'/response-utils.js':['response-utils.js','text/javascript; charset=utf-8'],'/workspace-client.js':['workspace-client.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
 async function readJSON(req,limit){
  if(!req.headers['content-type']?.includes('application/json'))throw Object.assign(new Error('需要 JSON 请求'),{status:415});
  const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>limit)throw Object.assign(new Error('保存数据过大'),{status:413});chunks.push(chunk);}

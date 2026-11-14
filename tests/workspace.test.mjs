@@ -203,6 +203,19 @@ test('a pending local save never turns an unseen remote connection addition into
  const client=createWorkspacePersistence({initial,read:()=>structuredClone(local)});
  local.chats[0].title='first';client.save();const first=client.flush();local.chats[0].title='second';client.save();release();assert(await first);assert(await client.flush());
 });
+test('deleting connections removes their secrets and selected reference but preserves chats and other connections',async()=>{
+ const dir=await mkdtemp(join(fixtureRoot,'delete-profile-')),path=join(dir,'workspace.json');
+ try{
+  const store=createWorkspaceStore(path),a={id:'a',name:'A',baseUrl:'https://same.test'},b={id:'b',name:'B',baseUrl:'https://same.test'};
+  const original=chat('preserved');await store.update(0,{profile:a,profiles:[a,b],keys:{a:'test-a',b:'test-b','https://same.test':'test-legacy'},chats:[original]});
+  let listing=await store.getSidebar(),selected=publicRecord(listing).data.profiles.find(p=>p.id==='a');
+  await store.patch({profiles:[{id:'a',baseEtag:selected._etag,deleted:true}]});
+  let data=(await store.get()).data;assert.equal(data.keys.a,undefined);assert.equal(data.keys.b,'test-b');assert.equal(data.keys['https://same.test'],'test-legacy');assert.equal(data.profile.id,'b');assert.deepEqual(data.chats,[original]);
+  selected=(await store.getSidebar()).data.profiles[0];
+  await store.patch({profiles:[{id:'b',baseEtag:selected._etag,deleted:true}]});
+  data=(await createWorkspaceStore(path).get()).data;assert.deepEqual(data.profiles,[]);assert.deepEqual(data.keys,{});assert.equal(data.profile.baseUrl,'');assert.deepEqual(data.chats,[original]);
+ }finally{await removeFixture(dir);}
+});
 
 test('sidebar order follows final assistant output time and is unchanged by opening or renaming a chat',async()=>{
  const dir=await mkdtemp(join(fixtureRoot,'output-order-')),path=join(dir,'workspace.json');

@@ -10,7 +10,7 @@ Requires Node.js 20.3 or later. No application dependencies need to be installed
 
 1. Download and extract this repository, or clone it.
 2. On Windows, double-click **`start.bat`**. A CMD window opens and launches the website in your browser.
-3. Open **API connection**, enter your API base URL and optional API key, then click **Connect**.
+3. Open **API connection** and click **New**. Choose **OpenAI / compatible API** to enter a base URL and key, or **Google Gemini** to use Google's prefilled official URL with your Gemini API key. Click **Connect**.
 4. Select a discovered model and start chatting.
 
 Keep the CMD window open while using the website. Closing it stops the server. The default address is `http://127.0.0.1:4177`.
@@ -24,6 +24,8 @@ node scripts/dev.mjs
 Then open the address shown in the terminal. A fresh installation creates its own workspace in `data/`; no existing server, account, domain, or external database is required. For a different port or data directory, set `PORT` or `LUMEN_DATA_DIR` in the process environment. See the [deployment guide](deploy/README.md) for all configuration variables and reverse-proxy setup.
 
 ## API compatibility
+
+Google Gemini is supported through [Google's official OpenAI compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai) at `https://generativelanguage.googleapis.com/v1beta/openai/`. Model discovery and streaming chat use the same connection flow. The client fetches available models instead of hardcoding model names. Select a saved connection and click **Delete connection** to remove it and its saved key; existing conversations are kept.
 
 Compatibility depends on the API protocol and the features exposed by the server. This client does not support every API format or authenticate with every provider.
 
@@ -50,7 +52,7 @@ Some APIs reject `stream_options.include_usage`; disable **Include usage** for t
 
 ### Current limits
 
-- No native OpenAI Responses API, Anthropic Messages API, Gemini API, or Azure-specific API-key/query-parameter adapter. A compatible Chat Completions gateway may work if it exposes the required endpoints.
+- No native OpenAI Responses API, Anthropic Messages API, Gemini `generateContent` adapter, or Azure-specific API-key/query-parameter adapter. Gemini uses Google's official OpenAI compatibility endpoint. Other compatible Chat Completions gateways may work if they expose the required endpoints.
 - No OAuth login, custom authentication headers, automatic agents/MCP execution, audio/video APIs, image generation, or PDF parsing.
 - Context-window and current load information are read from LM Studio's native API. Standard chat APIs often do not expose their active server settings.
 - Cache statistics display what the API reports; this client does not enable or control server-side caching.

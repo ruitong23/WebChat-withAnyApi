@@ -5,6 +5,21 @@ export function normalizeBase(raw) {
   url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/(?:api\/v[01]|v1)(?:\/(?:chat\/completions|models))?$/, '');
   return url.href.replace(/\/$/, '');
 }
+export const googleBase = 'https://generativelanguage.googleapis.com/v1beta/openai';
+export function isGoogleBase(raw) {
+  try { return normalizeBase(raw) === googleBase; } catch { return false; }
+}
+// The app uses logical /v1 paths; Google's official compatibility base already
+// includes its API version and must not receive another /v1 segment.
+export function apiURL(raw, path) {
+  const base = normalizeBase(raw);
+  if (!allowedPaths.test(path)) throw new Error('此接口路径不在支持范围内');
+  if (isGoogleBase(base)) {
+    if (!path.startsWith('/v1/')) throw new Error('此接口路径不在支持范围内');
+    return base + path.slice(3);
+  }
+  return base + path;
+}
 function isPrivate(host) {
   const h = host.toLowerCase().replace(/^\[|\]$/g, '');
   return /^(localhost|.*\.localhost|.*\.local|.*\.internal)$/.test(h) || /^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(h) || h === '::1' || h === '::' || h.includes(':') || /^\d+$/.test(h);
@@ -31,7 +46,7 @@ export async function relay(request, options = {}) {
       headers.Authorization = `Bearer ${data.apiKey}`;
     }
     const signal = path.endsWith('/chat/completions') ? request.signal : AbortSignal.any([request.signal, AbortSignal.timeout(get ? 20000 : 300000)]);
-    const response = await (options.fetch || fetch)(base + path, {method, headers, body:get ? undefined : JSON.stringify(data.payload || {}), signal, redirect:'manual'});
+    const response = await (options.fetch || fetch)(apiURL(base, path), {method, headers, body:get ? undefined : JSON.stringify(data.payload || {}), signal, redirect:'manual'});
     if (response.status >= 300 && response.status < 400) return json({error:{message:'接口返回重定向。请填写重定向后的准确 API 地址。'}},502);
     return new Response(response.body,{status:response.status,headers:{'Content-Type':response.headers.get('content-type') || 'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
   } catch(error) {

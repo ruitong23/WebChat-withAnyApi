@@ -13,6 +13,7 @@
     "test:generation": "node tests/generation.browser.mjs",
     "test:chat-actions": "node tests/chat-actions.browser.mjs",
     "test:streaming": "node tests/streaming.browser.mjs",
+    "test:connections": "node tests/connections.browser.mjs",
     "test:scroll": "node tests/scroll.browser.mjs",
     "validate": "node scripts/validate-artifact.mjs"
   }

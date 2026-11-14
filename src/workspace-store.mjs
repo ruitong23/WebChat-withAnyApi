@@ -122,7 +122,12 @@ export function createWorkspaceStore(filePath){
    if(typeof change.id!=='string'||!change.id||['constructor','prototype','__proto__'].includes(change.id))throw new Error('连接 ID 无效');
    let old=index.data.profiles.find(p=>p.id===change.id),id=change.id;
    const stale=(old?profileEtag(old):null)!==(change.baseEtag??null);
-   if(change.deleted){if(stale){conflicts.push('profiles:'+id);continue;}index.data.profiles=index.data.profiles.filter(p=>p.id!==id);delete index.data.keys[id];continue;}
+   if(change.deleted){
+    if(stale){conflicts.push('profiles:'+id);continue;}
+    index.data.profiles=index.data.profiles.filter(p=>p.id!==id);delete index.data.keys[id];
+    if(old?.baseUrl&&!index.data.profiles.some(p=>p.baseUrl===old.baseUrl))delete index.data.keys[old.baseUrl];
+    continue;
+   }
    let profile={...change.profile,id,mode:'proxy'};delete profile._etag;delete profile.hasKey;delete profile.apiKey;
    validateWorkspace({profiles:[profile]});
    const previousKey=old?(index.data.keys[id]??index.data.keys[old.baseUrl]??''):'';
@@ -160,7 +165,9 @@ export function createWorkspaceStore(filePath){
   if(settings.active&&remaps.chats[settings.active])settings.active=remaps.chats[settings.active];
   if(remaps.chats[index.data.active])index.data.active=remaps.chats[index.data.active];
   if(remaps.profiles[index.data.profile?.id])index.data.profile={...index.data.profile,id:remaps.profiles[index.data.profile.id]};
-  Object.assign(index.data,settings);index.revision++;index.updatedAt=new Date().toISOString();index.catalogVersion=2;
+  Object.assign(index.data,settings);
+  if(changes.profiles?.some(p=>p.deleted&&p.id===index.data.profile?.id)&&!index.data.profiles.some(p=>p.id===index.data.profile.id))index.data.profile=index.data.profiles[0]||{name:'API 连接',baseUrl:'',mode:'proxy',remember:true,nativeUrl:''};
+  index.revision++;index.updatedAt=new Date().toISOString();index.catalogVersion=2;
   for(const path of writes.keys())removals.delete(path);
   const journal={version:1,index,writes:[...writes].map(([path,value])=>({path,value})),removals:[...removals]};await atomicWrite(journalPath,journal);await finish(journal);
   return {record:withProfileEtags(page(index)),etags,projectEtags,remaps,conflicts};

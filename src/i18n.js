@@ -1,6 +1,17 @@
 // Source copy is Chinese. Only authored UI literals pass through this module;
 // interpolated messages, model names, connection names and API data stay intact.
 export const english = Object.freeze({
+  '选择接口类型':'Choose an API type',
+  'OpenAI / 兼容接口':'OpenAI / compatible API',
+  '连接 OpenAI、LM Studio 或其他兼容服务。':'Connect to OpenAI, LM Studio or another compatible service.',
+  '已填好 Google 官方地址，只需输入 Gemini API Key。':'The official Google URL is filled in. Just enter your Gemini API key.',
+  'Google 官方地址已填好，只需输入 Gemini API Key。':'The official Google URL is filled in. Just enter your Gemini API key.',
+  '删除 API 连接':'Delete API connection',
+  '删除连接':'Delete connection',
+  '删除“':'Delete “',
+  '”及其保存的 API Key？已有对话会保留。':'” and its saved API key? Existing chats will be kept.',
+  '连接已被其他设备修改，未删除，请重新确认':'The connection changed on another device and was not deleted. Review it and try again.',
+  'API 连接已删除':'API connection deleted',
   '问题已保存到服务器':'Question saved on server',
   '回复将在生成结束后保存':'The reply will be saved when generation ends',
   '重命名对话':'Rename chat',

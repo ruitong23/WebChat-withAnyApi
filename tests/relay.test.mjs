@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {relay,normalizeBase} from '../src/relay.js';
+import {relay,normalizeBase,googleBase,isGoogleBase,apiURL} from '../src/relay.js';
 const request=(data,extra={})=>new Request('https://studio.test/api/relay',{method:'POST',headers:{'Content-Type':'application/json','Origin':'https://studio.test',...extra.headers},body:JSON.stringify(data)});
 test('normalize host, /v1, full completion endpoint and reverse proxy prefix',()=>{
  for(const [input,expected] of [['https://example.test/','https://example.test'],['https://example.test/v1/','https://example.test'],['https://example.test/llm/v1/chat/completions','https://example.test/llm'],['https://example.test/api/v1','https://example.test']])assert.equal(normalizeBase(input),expected);
@@ -9,6 +9,22 @@ test('normalize host, /v1, full completion endpoint and reverse proxy prefix',()
 test('models discovery forwards bearer key only to supplied API and keeps server response',async()=>{
  let target,opts;const res=await relay(request({baseUrl:'https://example.test/v1',apiKey:'test-secret',path:'/v1/models'}),{fetch:async(url,options)=>{target=url;opts=options;return Response.json({data:[{id:'model-a'}]});}});
  assert.equal(target,'https://example.test/v1/models');assert.equal(opts.headers.Authorization,'Bearer test-secret');assert.equal(opts.method,'GET');assert.equal(opts.body,undefined);assert.equal(res.headers.get('Cache-Control'),'no-store');assert.deepEqual(await res.json(),{data:[{id:'model-a'}]});
+});
+test('Google official compatibility URL lists models and streams without an extra /v1',async()=>{
+ assert(isGoogleBase(googleBase+'/'));assert(!isGoogleBase('https://example.test/v1beta/openai'));
+ assert.equal(apiURL(googleBase,'/v1/models'),googleBase+'/models');
+ assert.equal(apiURL(googleBase,'/v1/embeddings'),googleBase+'/embeddings');
+ assert.throws(()=>apiURL(googleBase,'/api/v1/models'));
+ for(const stream of [false,true]){
+  const payload=stream?{model:'gemini-test',messages:[{role:'user',content:'test'}],stream:true}:undefined;
+  const response=await relay(request({baseUrl:googleBase+'/',path:stream?'/v1/chat/completions':'/v1/models',apiKey:'test-google-key',payload}),{fetch:async(url,options)=>{
+   assert.equal(url,googleBase+(stream?'/chat/completions':'/models'));
+   assert.equal(options.headers.Authorization,'Bearer test-google-key');assert(!url.includes('test-google-key'));
+   if(stream){assert.deepEqual(JSON.parse(options.body),payload);return new Response('data: {"choices":[{"delta":{"content":"Gemini reply"}}]}\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});}
+   return Response.json({data:[{id:'gemini-test'}]});
+  }});
+  assert.equal(response.status,200);assert.match(await response.text(),stream?/Gemini reply/:/gemini-test/);
+ }
 });
 test('supports streamed chat and parameter payload without buffering',async()=>{
  const stream=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"你好"}}]}\n\ndata: [DONE]\n\n'));c.close();}});
