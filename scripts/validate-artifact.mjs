@@ -10,6 +10,9 @@ for(const path of ['server/index.mjs','server/relay.js','server/vertex-express.j
 }
 for(const path of ['public/index.html','public/style.css','deploy/nginx.conf','deploy/lumen.service','README.md'])await access(new URL(path,root));
 const server=await readFile(new URL('server/index.mjs',root),'utf8');
+await access(new URL('public/rendering.js',root));
+const vendorAssets=JSON.parse(await readFile(new URL('public/vendor/manifest.json',root),'utf8'));
+for(const path of Object.keys(vendorAssets))await access(new URL('public/vendor/'+path,root));
 assert(server.includes("root=new URL('../public/',import.meta.url)"));
 assert(!server.includes("from '../src/"));
 const service=await readFile(new URL('deploy/lumen.service',root),'utf8');

@@ -15,6 +15,12 @@ const workspaceStore=createWorkspaceStore(process.env.LUMEN_WORKSPACE_FILE||join
 // Finish migration/recovery before announcing a healthy service.
 await workspaceStore.revision();
 const assets={'/':['index.html','text/html; charset=utf-8'],'/index.html':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/relay.js':['relay.js','text/javascript; charset=utf-8'],'/vertex-express.js':['vertex-express.js','text/javascript; charset=utf-8'],'/vertex-catalog.js':['vertex-catalog.js','text/javascript; charset=utf-8'],'/i18n.js':['i18n.js','text/javascript; charset=utf-8'],'/response-utils.js':['response-utils.js','text/javascript; charset=utf-8'],'/workspace-client.js':['workspace-client.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
+assets['/rendering.js']=['rendering.js','text/javascript; charset=utf-8'];
+const vendorAssets=JSON.parse(await readFile(new URL('vendor/manifest.json',root),'utf8'));
+for(const [name,type] of Object.entries(vendorAssets)){
+ if(!/^[a-zA-Z0-9_./-]+$/.test(name)||name.split('/').some(part=>!part||part==='.'||part==='..'))throw new Error('Invalid vendor asset path');
+ assets['/vendor/'+name]=['vendor/'+name,type];
+}
 async function readJSON(req,limit){
  if(!req.headers['content-type']?.includes('application/json'))throw Object.assign(new Error('需要 JSON 请求'),{status:415});
  const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>limit)throw Object.assign(new Error('保存数据过大'),{status:413});chunks.push(chunk);}

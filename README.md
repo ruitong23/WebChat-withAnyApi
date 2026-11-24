@@ -4,6 +4,8 @@ A server-hosted web client for OpenAI-compatible chat APIs, with persistent conv
 
 The interface follows your browser's preferred language: Chinese for Chinese language settings, and English otherwise.
 
+Replies render Markdown tables, lists, code and LaTeX formulas, including Chinese text in `\text{...}`. Math supports `$...$`, `$$...$$`, `\(...\)` and `\[...\]` through KaTeX. Rendering also applies to saved history and updates during streaming as delimiters close. Copy, export and server storage preserve the original message. Browser libraries and mathematical fonts are bundled locally; no CDN is required. See [rendering dependency versions and licenses](src/vendor/README.md).
+
 ## Quick start
 
 Requires Node.js 20.3 or later. No application dependencies need to be installed.
