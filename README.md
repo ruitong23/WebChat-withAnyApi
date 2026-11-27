@@ -4,6 +4,10 @@ A server-hosted web client for OpenAI-compatible chat APIs, with persistent conv
 
 The interface follows your browser's preferred language: Chinese for Chinese language settings, and English otherwise.
 
+System prompt presets store only prompt text. New conversations start with the built-in `empty` preset; save an edited prompt as a new preset, update or rename a selected preset, or delete it. Existing parameter presets remain readable, but selecting them applies only their system prompt. Each conversation keeps its own current prompt, separately from shared model sampling settings, so applying a prompt never changes temperature, Top P or output limits.
+
+At narrow desktop and mobile widths, model settings open in an overlay drawer without moving or shrinking the conversation.
+
 Replies render Markdown tables, lists, code and LaTeX formulas, including Chinese text in `\text{...}`. Math supports `$...$`, `$$...$$`, `\(...\)` and `\[...\]` through KaTeX. Rendering also applies to saved history and updates during streaming as delimiters close. Copy, export and server storage preserve the original message. Browser libraries and mathematical fonts are bundled locally; no CDN is required. See [rendering dependency versions and licenses](src/vendor/README.md).
 
 ## Quick start

@@ -31,10 +31,11 @@ const proxy=http.createServer(async(req,res)=>{
   const upstream=http.request(backend+req.url,{method:req.method,headers:req.headers},response=>{res.writeHead(response.statusCode,response.headers);response.pipe(res);});
   upstream.on('error',()=>{res.writeHead(502);res.end();});req.pipe(upstream);res.on('close',()=>upstream.destroy());return;
  }
- const assets=new Set(['index.html','app.js','i18n.js','response-utils.js','workspace-client.js','style.css']);
+ const vendor=JSON.parse(await readFile(new URL('../src/vendor/manifest.json',import.meta.url),'utf8'));
+ const assets=new Set(['index.html','app.js','rendering.js','relay.js','vertex-express.js','vertex-catalog.js','i18n.js','response-utils.js','workspace-client.js','style.css',...Object.keys(vendor).map(name=>'vendor/'+name)]);
  const path=req.url==='/'?'index.html':req.url.slice(1);
  if(!assets.has(path)){res.writeHead(404);res.end();return;}
- try{const data=await readFile(new URL('../src/'+path,import.meta.url));res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');res.end(data);}catch{res.writeHead(404);res.end();}
+ try{const data=await readFile(new URL('../src/'+path,import.meta.url));res.setHeader('Content-Type',path.endsWith('.js')||path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.woff2')?'font/woff2':'text/html');res.end(data);}catch{res.writeHead(404);res.end();}
 });
 await new Promise(r=>proxy.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${proxy.address().port}`;
 const wait=async(check,label)=>{for(let i=0;i<150;i++){if(await check())return;await new Promise(r=>setTimeout(r,40));}throw new Error('Timeout: '+label+'\n'+output);};

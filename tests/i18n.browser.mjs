@@ -43,15 +43,15 @@ try{
   await page.locator('[data-action="shortcuts"]').click();await checkCopy();await page.locator('[data-action="close-modal"]').click();
   await page.locator('[data-action="demo"]').click();await page.locator('#prompt').fill('保留原文：模型连接');await page.locator('#send').click();
   await page.locator('[data-action="stop"]').waitFor({state:'hidden'});
-  assert.equal(await page.locator('.message').first().locator('.message-content').textContent(),'保留原文：模型连接');
-  assert.equal(await page.locator('.message').last().locator('.message-content').textContent(),english?'Demo message.':'演示消息。');
+  assert.equal(await page.locator('.message').first().locator('.message-content p').textContent(),'保留原文：模型连接');
+  assert.equal(await page.locator('.message').last().locator('.message-content p').textContent(),english?'Demo message.':'演示消息。');
   assert.match(await page.locator('#request-metrics').textContent(),english?/Received/:/已接收/);
   await page.waitForFunction(async()=>(await (await fetch('/api/workspace')).json()).data.chats?.[0]?.messages?.length===2);
   await page.waitForFunction(()=>/已保存到服务器|Saved on server/.test(document.querySelector('#storage-status')?.textContent||''));
   // Custom names, prompts and model-returned Chinese must survive English rendering.
   await page.evaluate(async()=>{const record=await (await fetch('/api/workspace')).json(),value=record.data;value.profile={name:'我的中文连接',baseUrl:'',mode:'proxy'};value.chats=[{id:'kept',title:'中文标题',messages:[{id:'u',role:'user',content:'中文问题'},{id:'a',role:'assistant',content:'中文模型回答',reasoning:'原始中文思考'}],params:{system:'保留中文提示词'}}];value.active='kept';value.parameterPolicyVersion=1;const response=await fetch('/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:record.revision,data:value})});if(!response.ok)throw new Error('Fixture save failed');});
   await page.reload();try{await page.locator('#msg-a').waitFor();}catch(error){const record=await (await fetch(url+'/api/workspace?view=sidebar')).json();console.log(JSON.stringify({active:record.data.active,activeId:record.activeId,ids:record.data.chats.map(c=>c.id),body:(await page.locator('body').innerText()).slice(0,500)}));await page.screenshot({path:fileURLToPath(new URL('failure.png',captures))});throw error;}
-  assert.equal(await page.locator('#msg-a .message-content').textContent(),'中文模型回答');
+  assert.equal(await page.locator('#msg-a .message-content p').textContent(),'中文模型回答');
   assert.equal(await page.locator('#system-prompt').inputValue(),'保留中文提示词');
   assert.match(await page.locator('.connection-mini').textContent(),/我的中文连接/);
   await page.locator('#msg-a .reasoning summary').click();await page.waitForFunction(()=>document.querySelector('#msg-a .reasoning pre')?.textContent==='原始中文思考');

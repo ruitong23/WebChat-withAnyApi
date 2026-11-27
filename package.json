@@ -17,6 +17,8 @@
     "test:vertex": "node tests/vertex-express.browser.mjs",
     "test:scroll": "node tests/scroll.browser.mjs",
     "validate": "node scripts/validate-artifact.mjs",
-    "test:rendering": "node tests/rendering.browser.mjs"
+    "test:rendering": "node tests/rendering.browser.mjs",
+    "test:prompt-presets": "node tests/prompt-presets.browser.mjs",
+    "test:inspector-layout": "node tests/inspector-layout.browser.mjs"
   }
 }
