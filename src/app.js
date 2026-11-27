@@ -1,6 +1,6 @@
 import {markdown} from './rendering.js';
 import {t,ui,locale,localizeError} from './i18n.js';
-import {responseText,apiDeltaText,splitThinking,createThinkingParser,addReceivedText,receptionStats} from './response-utils.js';
+import {addReceivedText,receptionStats} from './response-utils.js';
 import {loadWorkspace,loadChat,loadSidebar,createWorkspacePersistence} from './workspace-client.js';
 import {googleBase,isGoogleBase,vertexBase,isVertexBase,apiURL} from './relay.js';
 const $ = (s, root=document) => root.querySelector(s);
@@ -37,7 +37,7 @@ if(state.activeProject!=='*'&&state.activeProject&&!state.projects.some(p=>p.id=
 state.params={...defaults,...current().params};
 state.profile.id ||= uid();
 let apiKey=getKey(state.profile.id);
-let modalCleanup=null,discoverSeq=0,lastFocus=null,conversationScroll=null,selectedPromptPreset='';
+let modalCleanup=null,discoverSeq=0,lastFocus=null,conversationScroll=null,selectedPromptPreset='',sessionSystemPrompt=state.params.system;
 let shared={id:'',record:null,remote:null,dirty:{},baseline:{},effective:{},status:'idle',error:'',saving:false},sharedTimer=null;
 const loadKeys=['context_length','eval_batch_size','flash_attention','offload_kv_cache_to_gpu','num_experts'];
 function current(){return state.chats.find(c=>c.id===state.active)||state.chats[0];}
@@ -50,7 +50,7 @@ const persistence=createWorkspacePersistence({initial:initialWorkspace,read:work
  if(state.activeProject!=='*'&&state.activeProject&&!state.projects.some(p=>p.id===state.activeProject))state.activeProject='*';
  if(!state.chats.some(chat=>chat.id===state.active))state.active=state.chats[0]?.id;
  if(!state.chats.length){const chat=freshChat();state.chats.push(chat);state.active=chat.id;}
- if(!state.streaming){state.params={...defaults,...current().params};state.draft=$('#prompt')?.value??state.draft;render();}
+ if(!state.streaming){state.params={...defaults,...current().params,system:sessionSystemPrompt};state.draft=$('#prompt')?.value??state.draft;render();}
  else{if($('#chat-list'))$('#chat-list').innerHTML=chatList();if($('#project-nav'))$('#project-nav').outerHTML=projectNav();}
 },onSaved:(record,options)=>{
  for(const chat of state.chats){const id=options.remaps?.chats?.[chat.id];if(id){const old=chat.id,task=generations.get(old);if(task){generations.delete(old);generations.set(id,task);}if(chatDrafts.has(old)){chatDrafts.set(id,chatDrafts.get(old));chatDrafts.delete(old);}if(state.active===old)state.active=id;chat.id=id;chat.title=record.data.chats.find(c=>c.id===id)?.title||chat.title+'（冲突副本）';if(state.listing)state.listing.ids=state.listing.ids.map(value=>value===old?id:value);const conversation=$('#conversation');if(conversation?.dataset.chat===old){conversation.dataset.chat=id;const title=$('#chat-title');if(title){title.dataset.dragChat=id;title.textContent=chat.title;}}}}
@@ -127,7 +127,7 @@ async function openChat(id){
  if(!(await flushSave()))return;
  try{const task=requestedTask||generations.get(id),chat=task?.chat||await loadChat(id);if(sequence!==openChatSequence)return;rememberDraft();for(const previous of state.chats)if(previous.id!==chat.id&&!generations.has(previous.id)&&Array.isArray(previous.messages)){delete previous.messages;delete previous.params;}
   const index=state.chats.findIndex(c=>c.id===chat.id);if(index<0)state.chats.push(chat);else state.chats[index]=chat;if(!task)persistence.hydrate(chat);
-  state.active=chat.id;state.model=chat.model||state.model;state.params={...defaults,...chat.params};selectedPromptPreset='';restoreDraft(chat.id);save();go('chat');await activateModelConfig();
+  state.active=chat.id;state.model=chat.model||state.model;state.params={...defaults,...chat.params,system:sessionSystemPrompt};restoreDraft(chat.id);save();go('chat');await activateModelConfig();
  }catch(error){toast(localizeError(error.message));}
 }
 async function removeChat(id){
@@ -135,7 +135,7 @@ async function removeChat(id){
  try{if(state.active===id){const next=state.chats.find(c=>c.id!==id&&(c.projectId||'')===(current().projectId||''))||state.chats.find(c=>c.id!==id);
    const task=next&&generations.get(next.id),chat=next?(task?.chat||await loadChat(next.id)):{...freshChat(),projectId:state.activeProject==='*'?'':state.activeProject};
    if(next){state.chats[state.chats.findIndex(c=>c.id===next.id)]=chat;if(!task)persistence.hydrate(chat);}else state.chats.unshift(chat);
-   state.active=chat.id;state.params={...defaults,...chat.params};
+   state.active=chat.id;state.params={...defaults,...chat.params,system:sessionSystemPrompt};
   }
   persistence.deleteChat(id);chatDrafts.delete(id);state.chats=state.chats.filter(c=>c.id!==id);save();render();
  }catch(error){toast(localizeError(error.message));}
@@ -155,7 +155,7 @@ function createProject(){
   const chats=scope==='group'?projectChats():scope==='current'?[current()]:[];
   if(scope==='group')persistence.moveGroup(state.activeProject,id);
   state.projects.push(project);for(const chat of chats)chat.projectId=id;
-  if(!chats.length){rememberDraft();++openChatSequence;const chat=freshChat();chat.projectId=id;state.chats.unshift(chat);state.active=chat.id;state.params={...defaults,...chat.params};state.draft='';state.attachments=[];}
+  if(!chats.length){rememberDraft();++openChatSequence;const chat=freshChat();chat.projectId=id;state.chats.unshift(chat);state.active=chat.id;state.params={...defaults,...chat.params,system:sessionSystemPrompt};state.draft='';state.attachments=[];}
   state.activeProject=id;state.sidebar.expandedProjects=[id,...state.sidebar.expandedProjects.filter(p=>p!==id)];save();closeModal();go('chat');
  };
 }
@@ -172,9 +172,9 @@ function manageProject(id){
 function toast(text){$('#toast').textContent=text;$('#toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('show'),3800);}
 function log(path,method,status,ms,message=''){state.logs.unshift({time:new Date().toLocaleTimeString(locale,{hour12:false}),path,method,status,ms,message});state.logs=state.logs.slice(0,120);if(state.page==='logs')renderPage();}
 function render(){
-  const previous=conversationScroll?.snapshot();
+  const previous=conversationScroll?.snapshot(),drawers=['show-sidebar','show-inspector'].filter(name=>$('#shell')?.classList.contains(name)).join(' ');
   document.documentElement.dataset.theme=state.theme;
-  $('#app').innerHTML=ui`<div class="shell ${!state.inspector||state.page!=='chat'?'no-inspector':''}" id="shell"><div class="mobile-overlay" data-action="close-drawers"></div>${sidebar()}<main class="workspace">${topbar()}<div id="main-page" class="${state.page==='chat'?'chat-page':'page'}"></div><footer class="statusbar"><span class="row"><span class="dot ${state.connected?'online':state.connecting?'busy':''}"></span>${state.connected?t('API 已连接'):state.connecting?t('正在连接'):t('等待连接')}</span><span>${state.connected?esc(state.profile.name):isVertexBase(state.profile.baseUrl)?'Vertex AI Express':isGoogleBase(state.profile.baseUrl)?'Google Gemini (AI Studio)':t('OpenAI 兼容接口')}</span>${state.connected?`<span class="mono">${state.latency} ms</span>`:''}<span class="right">Lumen Studio <span class="muted">/</span> 模型客户端</span></footer></main>${state.inspector&&state.page==='chat'?inspector():''}</div>`;
+  $('#app').innerHTML=ui`<div class="shell ${drawers} ${!state.inspector||state.page!=='chat'?'no-inspector':''}" id="shell"><div class="mobile-overlay" data-action="close-drawers"></div>${sidebar()}<main class="workspace">${topbar()}<div id="main-page" class="${state.page==='chat'?'chat-page':'page'}"></div><footer class="statusbar"><span class="row"><span class="dot ${state.connected?'online':state.connecting?'busy':''}"></span>${state.connected?t('API 已连接'):state.connecting?t('正在连接'):t('等待连接')}</span><span>${state.connected?esc(state.profile.name):isVertexBase(state.profile.baseUrl)?'Vertex AI Express':isGoogleBase(state.profile.baseUrl)?'Google Gemini (AI Studio)':t('OpenAI 兼容接口')}</span>${state.connected?`<span class="mono">${state.latency} ms</span>`:''}<span class="right">Lumen Studio <span class="muted">/</span> 模型客户端</span></footer></main>${state.inspector&&state.page==='chat'?inspector():''}</div>`;
   renderPage(previous);bind();restoreSidebarScroll();
 }
 function sidebar(){return ui`<aside class="sidebar"><div class="brand row">${logo()}<div><div class="brand-name">Lumen <span>Studio</span></div><div class="brand-sub">模型客户端</div></div></div><nav class="nav" aria-label="主导航">${[['chat','chat',t('聊天'),'⌘ 1'],['models','box',t('模型库'),''],['connection','link',t('API 连接'),''],['logs','terminal',t('请求日志'),'']].map(([id,ic,name,k])=>`<button data-page="${id}" class="${state.page===id?'active':''}">${icon(ic)}<span>${name}</span>${id==='models'&&state.models.length?`<b class="badge">${state.models.length}</b>`:`<small class="shortcut">${k}</small>`}</button>`).join('')}</nav>${projectNav()}<div class="sidebar-heading row between"><span>工作空间</span><span class="small">${sidebarCount('*')} 个对话</span></div><button class="new-chat" data-action="new-chat">${icon('plus')}<span class="grow">新建对话</span><span class="shortcut">Ctrl N</span></button><div class="chat-search">${icon('search')}<input id="chat-search" placeholder="搜索对话…" value="${esc(state.chatFilter)}" aria-label="搜索对话"></div><div class="chat-list" id="chat-list">${chatList()}</div><div class="side-bottom"><button class="connection-mini" data-page="connection"><span class="dot ${state.connected?'online':''}"></span><span class="grow truncate">${esc(state.profile.name)}<small>${state.connected?ui`${state.models.length} 个模型可用`:t('添加 API 连接')}</small></span>${icon('chevron')}</button><div class="side-footer">${storageStatusHTML()}<span class="row">${ib(t('偏好设置'),'settings','settings')}${ib(t('切换深浅主题'),'theme',state.theme==='light'?'moon':'sun')}</span></div></div></aside>`;}
@@ -234,8 +234,8 @@ function bindPage(){
  // Discovery is started after the user submits both address and key, so input focus is never interrupted.
 }
 function updateParam(el){const name=el.dataset.param;let value=el.type==='checkbox'?el.checked:el.type==='number'?Number(el.value):el.value;if(el.type==='number'&&(!Number.isFinite(value)||el.validity.rangeUnderflow||el.validity.rangeOverflow)){toast(t('参数超出允许范围'));el.value=state.params[name];return;}state.params[name]=value;if(name==='system')syncPromptPresetSelection();if(configurableParams.includes(name))state.params['override_'+name]=true;const range=$(`[data-range="${name}"]`);if(range)range.value=value;persistParams();}
-function persistParams(){current().params={...state.params};save();scheduleSharedSave();}
-function go(page){rememberDraft();state.page=page;render();}
+function persistParams(){sessionSystemPrompt=state.params.system;current().params={...state.params};save();scheduleSharedSave();}
+function go(page){rememberDraft();$('#shell')?.classList.remove('show-sidebar','show-inspector');state.page=page;render();}
 async function setModel(id){if(Object.keys(shared.dirty).length&&!(await flushShared()))return toast(t('当前模型还有未同步的修改，请先处理配置面板中的提示'));state.model=id;current().model=id;save();render();await activateModelConfig();}
 async function onClick(e){const el=e.target.closest('button,[data-action]');if(!el||el.disabled)return;if(state.preparing)return toast(t('正在读取最新共享参数，请稍候'));
  if(el.dataset.override){const name=el.dataset.override;state.params['override_'+name]=!state.params['override_'+name];if(name==='max_tokens'&&!state.params.override_max_tokens)state.params.max_tokens=0;persistParams();renderInspector();return;}
@@ -254,8 +254,8 @@ async function onClick(e){const el=e.target.closest('button,[data-action]');if(!
  const action=el.dataset.action||'';if(action.startsWith('project-settings:'))return manageProject(action.slice('project-settings:'.length));if(action.startsWith('copy-message:'))return copy(contentText(current().messages.find(m=>m.id===action.split(':')[1])));
  if(action.startsWith('edit-message:'))return editMessage(action.split(':')[1]);
  if(action.startsWith('regenerate:'))return regenerate(action.split(':')[1]);
- switch(action){case 'load-more':if(state.sidebarLoading)return;if(!(await flushSave()))return;state.sidebar.limit+=15;await refreshSidebar();save();break;case 'new-project':createProject();break;case 'move-chat':moveChat();break;case 'new-chat':{rememberDraft();++openChatSequence;const c=freshChat();c.projectId=state.activeProject==='*'?'':state.activeProject;if(c.projectId)state.sidebar.expandedProjects=[c.projectId,...state.sidebar.expandedProjects.filter(id=>id!==c.projectId)];c.params={...state.params,system:''};state.params={...state.params,system:''};selectedPromptPreset='empty';c.model=state.model;state.chats.unshift(c);state.active=c.id;state.draft='';state.attachments=[];save();go('chat');$('#prompt')?.focus();}break;
- case 'send':send();break;case 'stop':state.controller?.abort();break;case 'pick-model':pickModel();break;case 'connect-page':go('connection');break;case 'models-page':go('models');break;case 'discover':discover();break;case 'refresh-models':discover();break;case 'save-connection':readConnectionForm();storeConnection();if(await flushSave())toast(t('连接已保存'));break;case 'retry-save':await flushSave();break;case 'import-browser':await importBrowserData();break;case 'disconnect':disconnect();break;
+ switch(action){case 'load-more':if(state.sidebarLoading)return;if(!(await flushSave()))return;state.sidebar.limit+=15;await refreshSidebar();save();break;case 'new-project':createProject();break;case 'move-chat':moveChat();break;case 'new-chat':{rememberDraft();++openChatSequence;const c=freshChat();c.projectId=state.activeProject==='*'?'':state.activeProject;if(c.projectId)state.sidebar.expandedProjects=[c.projectId,...state.sidebar.expandedProjects.filter(id=>id!==c.projectId)];c.params={...state.params,system:sessionSystemPrompt};c.model=state.model;state.chats.unshift(c);state.active=c.id;state.draft='';state.attachments=[];save();go('chat');$('#prompt')?.focus();}break;
+ case 'send':send();break;case 'stop':{const task=generations.get(state.active);if(task?.remote)stopServerGeneration(task);else state.controller?.abort();}break;case 'pick-model':pickModel();break;case 'connect-page':go('connection');break;case 'models-page':go('models');break;case 'discover':discover();break;case 'refresh-models':discover();break;case 'save-connection':readConnectionForm();storeConnection();if(await flushSave())toast(t('连接已保存'));break;case 'retry-save':await flushSave();break;case 'import-browser':await importBrowserData();break;case 'disconnect':disconnect();break;
  case 'inspector':if(innerWidth<=1120){if(!$('.inspector')){state.inspector=true;render();}$('#shell').classList.toggle('show-inspector');}else{state.inspector=!state.inspector;save();render();}break;
  case 'sidebar':$('#shell').classList.toggle('show-sidebar');restoreSidebarScroll();break;case 'close-drawers':$('#shell').classList.remove('show-sidebar','show-inspector');break;
  case 'theme':state.theme=state.theme==='light'?'dark':'light';save();render();break;case 'light-theme':case 'dark-theme':state.theme=action.split('-')[0];save();render();break;case 'settings':go('settings');break;
@@ -318,7 +318,7 @@ async function importBrowserData(){
  state.profile.id ||= uid();apiKey=getKey(state.profile.id);
  for(const preset of oldPresets)if(!presets.some(p=>JSON.stringify(p)===JSON.stringify(preset)))presets.push(preset);
  if(['light','dark'].includes(uiPrefs.theme))state.theme=uiPrefs.theme;if(typeof uiPrefs.inspector==='boolean')state.inspector=uiPrefs.inspector;
- state.params={...defaults,...current().params};save();render();
+ state.params={...defaults,...current().params,system:sessionSystemPrompt};save();render();
  if(await flushSave()){for(const storage of [localStorage,sessionStorage])try{for(const key of Object.keys(storage))if(key==='lumen.v1'||key==='lumen.presets'||key==='lumen.ui'||key.startsWith('lumen.key.'))storage.removeItem(key);}catch{}toast(ui`已导入 ${chats.length} 个对话`);}
 }
 function normalizeBase(raw){const u=new URL(raw.trim());if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||u.hash)throw new Error(t('请输入完整的 HTTP(S) API 基础地址'));u.pathname=u.pathname.replace(/\/+$/,'').replace(/\/(?:api\/v[01]|v1)(?:\/(?:chat\/completions|models))?$/,'');return u.href.replace(/\/$/,'');}
@@ -385,7 +385,8 @@ async function send({regenerateMessages=null}={}){
  }
  let payload;try{payload=buildPayload(chat.messages);}catch(error){return toast(error.message);}
  const assistant={id:uid(),role:'assistant',content:'',model:state.model,status:'pending',created:Date.now(),startedAt:Date.now(),receivedEvents:0,receivedBytes:0,requestOutputLimit:payload.max_tokens||payload.max_completion_tokens||null};
- const task={chat,assistant,profile:{...state.profile},key:apiKey,preview:state.preview,controller:new AbortController(),persistOutput:false};
+ if(!state.preview)assistant.generationId=assistant.id;
+ const task={chat,assistant,profile:{...state.profile},key:apiKey,preview:state.preview,controller:new AbortController(),persistOutput:false,remote:!state.preview,id:assistant.id};
  chat.params={...state.params};chat.messages.push(assistant);task.savedMessages=structuredClone(chat.messages);generations.set(chat.id,task);
  state.attachments=[];state.draft='';chatDrafts.delete(chat.id);
  const prompt=$('#prompt');if(prompt){prompt.value='';prompt.style.height='';}
@@ -399,54 +400,63 @@ async function send({regenerateMessages=null}={}){
    }
   }else{
    if(!(await flushSave()))throw new Error(t('对话尚未保存，请先重试保存'));
-   const response=await api('/v1/chat/completions',payload,{profile:task.profile,key:task.key,signal:task.controller.signal,raw:true});
-   assistant.connectedAt=Date.now();if(state.active===chat.id)renderThinkingDock();
-   if(response.headers.get('content-type')?.includes('text/event-stream'))await readSSE(response,assistant,chat);
-   else{
-    const body=await response.text();assistant.receivedBytes=new TextEncoder().encode(body).byteLength;assistant.receivedEvents=1;assistant.lastActivityAt=Date.now();
-    const data=JSON.parse(body);if(data.error)throw new Error(localizeError(data.error.message)||t('接口返回错误'));
-    const message=data.choices?.[0]?.message;if(!message)throw new Error(t('响应缺少 choices[0].message'));
-    const fields=apiDeltaText(message),parsed=splitThinking(fields.content,{final:true});
-    assistant.content=parsed.content;assistant.reasoning=fields.reasoning+parsed.reasoning;assistant.tool_calls=message.tool_calls;assistant.vertexParts=message.vertex_parts;assistant.usage=data.usage;assistant.finishReason=data.choices?.[0]?.finish_reason||data.stop_reason||'';
-   }
+   try{await generationRequest('/api/generations','POST',{id:assistant.id,chatId:chat.id,messageId:assistant.id,baseUrl:task.profile.baseUrl,profileId:task.profile.id,apiKey:task.key||undefined,payload});}
+   catch(error){if(error.httpStatus)throw error;/* An unknown POST result is recovered by task ID, never sent twice. */}
+   await followServerGeneration(task);
   }
-  assistant.status=['length','max_tokens','max_output_tokens'].includes(assistant.finishReason)?'truncated':!assistant.content&&assistant.reasoning&&!assistant.tool_calls?.length?'reasoning_only':'complete';
+  if(!task.remote)assistant.status=['length','max_tokens','max_output_tokens'].includes(assistant.finishReason)?'truncated':!assistant.content&&assistant.reasoning&&!assistant.tool_calls?.length?'reasoning_only':'complete';
   if(!assistant.content&&!assistant.reasoning&&!assistant.tool_calls?.length)throw new Error(t('接口未返回任何文本或工具调用'));
  }catch(error){
   assistant.received=receptionStats(assistant);
   if(error.name==='AbortError'){assistant.status='stopped';if(!assistant.content&&!assistant.reasoning)assistant.content=t('生成已停止。');}
   else{const partial=!!assistant.content||!!assistant.reasoning||!!assistant.tool_calls?.length;assistant.interrupted=partial;assistant.error=!partial;assistant.status=partial?'interrupted':'error';assistant.errorInfo=error.message;if(!partial)assistant.content=error.message;}
  }finally{
-  assistant.finishedAt=Date.now();assistant.ms=Math.round(performance.now()-start);assistant.thinking=false;task.persistOutput=true;save();await flushSave();
-  generations.delete(chat.id);refreshGenerationIndicators();
+  assistant.finishedAt=Date.now();assistant.ms=Math.round(performance.now()-start);assistant.thinking=false;if(!task.serverSaved){task.persistOutput=true;save();await flushSave();}
+  generations.delete(chat.id);refreshGenerationIndicators();if(task.serverSaved)await refreshSidebar();
   if(state.active===chat.id&&state.page==='chat'){updateAssistant(assistant,true,chat);updateSendUI();renderThinkingDock();}
  }
 }
-async function readSSE(response,assistant,chat){
- const reader=response.body.getReader(),decoder=new TextDecoder(),parser=createThinkingParser();let buffer='',sawDone=false;const tools=new Map();let renderAt=0,renderTimer=0;
- const acceptText=(content,reasoning,thinking)=>{
-  if(content)assistant.content+=content;
-  if(reasoning){assistant.reasoning=(assistant.reasoning||'')+reasoning;assistant.reasoningPreview=((assistant.reasoningPreview||'')+reasoning).slice(-240);}
-  addReceivedText(assistant,content+reasoning);
-  assistant.thinking=thinking||!!assistant.reasoning&&!assistant.content;
- };
- const frame=block=>{
-  const data=block.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!data)return;if(data.trim()==='[DONE]'){sawDone=true;return;}
-  let event;try{event=JSON.parse(data);}catch{throw new Error(t('API 流式响应格式无效（不是合法 JSON）'));}if(event.error)throw new Error(localizeError(event.error.message)||t('API 流式错误'));
-  assistant.receivedEvents=(assistant.receivedEvents||0)+1;assistant.lastActivityAt=Date.now();
-  if(event.usage)assistant.usage={...(assistant.usage||{}),...event.usage};
-  const finish=event.choices?.[0]?.finish_reason||event.finish_reason||event.stop_reason;if(finish)assistant.finishReason=finish;
-  const d=event.choices?.[0]?.delta||event.choices?.[0]?.message||{},fields=apiDeltaText(d),parsed=parser.push(fields.content);
-  acceptText(parsed.content,fields.reasoning+parsed.reasoning,parsed.thinking);
-  if(d.vertex_parts?.length)(assistant.vertexParts??=[]).push(...d.vertex_parts);
-  if(d.tool_calls)for(const t of d.tool_calls){const index=t.index??0;const old=tools.get(index)||{id:'',type:'function',function:{name:'',arguments:''}};if(t.id)old.id=t.id;if(t.function?.name)old.function.name+=t.function.name;if(t.function?.arguments){old.function.arguments+=t.function.arguments;addReceivedText(assistant,t.function.arguments);}tools.set(index,old);}if(tools.size)assistant.tool_calls=[...tools.values()];
-  const elapsed=performance.now()-renderAt;
-  if(elapsed>180){clearTimeout(renderTimer);renderTimer=0;updateAssistant(assistant,false,chat);renderAt=performance.now();}
-  else if(!renderTimer)renderTimer=setTimeout(()=>{renderTimer=0;updateAssistant(assistant,false,chat);renderAt=performance.now();},180-elapsed);
- };
- try{while(true){const{value,done}=await reader.read();if(value?.byteLength){assistant.receivedBytes=(assistant.receivedBytes||0)+value.byteLength;assistant.lastActivityAt=Date.now();}buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});buffer=buffer.replace(/\r\n/g,'\n');let end;while((end=buffer.indexOf('\n\n'))>=0){frame(buffer.slice(0,end));buffer=buffer.slice(end+2);}if(sawDone){await reader.cancel();break;}if(done){if(buffer.trim())frame(buffer);break;}}}
- finally{clearTimeout(renderTimer);const tail=parser.push('',{final:true});acceptText(tail.content,tail.reasoning,tail.thinking);reader.releaseLock();updateAssistant(assistant,false,chat);}
- if(!sawDone&&!assistant.finishReason)throw new Error(t('流连接在返回结束标记前断开，已保留全部已接收内容。可继续生成或重试。'));
+async function generationRequest(path,method='GET',body){
+ const response=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15000)});
+ const result=await response.json();if(!response.ok)throw Object.assign(new Error(localizeError(result.error)||t('生成任务连接失败')),{httpStatus:response.status});return result;
+}
+async function stopServerGeneration(task){try{await generationRequest('/api/generations/'+task.id+'/stop','POST',{});}catch(error){toast(localizeError(error.message));}}
+async function followServerGeneration(task){
+ let version=-1,missing=0;
+ while(true){
+  let snapshot;
+  try{snapshot=(await generationRequest('/api/generations/'+task.id+'?after='+version)).task;missing=0;}
+  catch(error){
+   if(error.httpStatus===404&&++missing>=4)throw new Error(t('生成任务未启动，请手动重试。'));
+   task.assistant.reconnecting=true;updateAssistant(task.assistant,false,task.chat);await new Promise(resolve=>setTimeout(resolve,1200));continue;
+  }
+  version=snapshot.version;const open=task.assistant.reasoningOpen;const visible=task.chat.params?.stream===false&&!snapshot.done?{...snapshot.assistant,content:'',reasoning:'',tool_calls:undefined,vertexParts:undefined}:snapshot.assistant;Object.assign(task.assistant,visible,{reconnecting:false});if(open!==undefined)task.assistant.reasoningOpen=open;
+  updateAssistant(task.assistant,false,task.chat);if(!snapshot.done)continue;
+  // The server already saved the final reply. Rebase local metadata before
+  // loading it, then hydrate the persistence baseline instead of writing it twice.
+  if(!(await flushSave())){await new Promise(resolve=>setTimeout(resolve,1200));continue;}
+  if(task.chat.id!==snapshot.chatId)return;
+  let remote;try{remote=await loadChat(task.chat.id);}catch(error){if(/不存在/.test(error.message)){task.serverSaved=true;return;}await new Promise(resolve=>setTimeout(resolve,1200));continue;}
+  persistence.hydrate(remote);const final=remote.messages.find(message=>message.id===task.id);if(final)Object.assign(task.assistant,final);
+  remote.messages=remote.messages.map(message=>message.id===task.id?task.assistant:message);Object.assign(task.chat,remote);task.savedMessages=structuredClone(remote.messages);task.serverSaved=true;return;
+ }
+}
+let findingGenerations=false;
+async function resumeServerGenerations(){
+ if(findingGenerations||persistence.dirty||state.preview)return;findingGenerations=true;
+ try{
+  const {tasks}=await generationRequest('/api/generations');
+  const pending=current().messages?.filter(message=>message.status==='pending'&&message.generationId)||[];
+  const candidates=[...tasks];for(const message of pending)if(!candidates.some(task=>task.id===message.generationId))candidates.push({id:message.generationId,chatId:current().id,messageId:message.id});
+  for(const entry of candidates){
+   if(generations.has(entry.chatId))continue;
+   let chat=state.chats.find(c=>c.id===entry.chatId);if(!chat?.messages){try{chat=await loadChat(entry.chatId);}catch{continue;}persistence.hydrate(chat);const index=state.chats.findIndex(c=>c.id===chat.id);if(index>=0)state.chats[index]=chat;else state.chats.push(chat);}
+   const assistant=chat.messages.find(message=>message.id===entry.messageId);if(!assistant)continue;
+   const task={id:entry.id,chat,assistant,remote:true,persistOutput:false,savedMessages:structuredClone(chat.messages),controller:new AbortController()};generations.set(chat.id,task);refreshGenerationIndicators();updateSendUI();
+   if(state.active===chat.id&&state.page==='chat')reconcileConversation();
+   (async()=>{try{await followServerGeneration(task);if(!task.serverSaved){task.persistOutput=true;save();await flushSave();}}catch(error){assistant.status='interrupted';assistant.interrupted=true;assistant.errorInfo=error.message;task.persistOutput=true;save();await flushSave();}finally{generations.delete(chat.id);refreshGenerationIndicators();if(state.active===chat.id&&state.page==='chat'){updateAssistant(assistant,true,chat);updateSendUI();renderThinkingDock();}await refreshSidebar();}})();
+  }
+ }catch{/* Reconnection never creates another model request. */}finally{findingGenerations=false;}
 }
 const renderedMessages=new WeakMap();
 function reconcileConversation(){
@@ -571,10 +581,10 @@ async function exportData(all){try{let projects=state.projects,chats=[current()]
 function download(text,name){const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[<>:"/\\|?*]/g,'-');a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);}
 async function copy(text){try{await navigator.clipboard.writeText(text);toast(t('已复制'));}catch{toast(t('浏览器禁止剪贴板访问，请手动选择复制'));}}
 $('#file-input').onchange=async e=>{const files=[...e.target.files];try{if(state.attachments.length+files.length>6)throw new Error(t('每条消息最多 6 个附件'));for(const file of files){if(file.size>8*1024**2)throw new Error(t('单个附件不能超过 8 MB'));if(file.type.startsWith('image/')){if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw new Error(t('图片请使用 PNG、JPEG、WebP 或 GIF'));const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});state.attachments.push({name:file.name,type:'image',data});}else{if(file.size>200000)throw new Error(t('文本附件请控制在 200 KB 内'));state.attachments.push({name:file.name,type:'text',data:await file.text()});}}state.draft=$('#prompt')?.value||'';renderPage();}catch(error){toast(error.message);}finally{e.target.value='';}};
-$('#import-input').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>20*1024**2)throw new Error(t('备份文件过大'));const data=JSON.parse(await file.text());if(data.format!=='lumen-studio'||!Array.isArray(data.chats)||!data.chats.every(c=>typeof c.title==='string'&&Array.isArray(c.messages)))throw new Error(t('不是有效的 Lumen Studio 会话备份'));const projectMap=new Map(),importedProjects=(Array.isArray(data.projects)?data.projects:[]).filter(p=>typeof p.id==='string'&&typeof p.name==='string'&&p.name.trim()).map(p=>{const id=uid();projectMap.set(p.id,id);return {id,name:p.name.slice(0,100),created:Number(p.created)||Date.now(),path:'projects/'+id};});const chats=data.chats.map(c=>({id:uid(),projectId:projectMap.get(c.projectId)||(state.activeProject==='*'?'':state.activeProject),title:c.title.slice(0,100),created:Number(c.created)||Date.now(),model:typeof c.model==='string'?c.model:'',params:{...defaults,...Object.fromEntries(Object.entries(c.params||{}).filter(([k])=>k in defaults))},messages:c.messages.filter(m=>['user','assistant','tool','system'].includes(m.role)).map(m=>({...m,id:uid(),content:typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text'&&typeof p.text==='string'||p.type==='image_url'&&/^data:image\/(?:png|jpeg|webp|gif);base64,/.test(p.image_url?.url||'')):''}))}));state.projects.push(...importedProjects);state.chats.unshift(...chats);if(chats.length){state.active=chats[0].id;state.activeProject=chats[0].projectId||'';}state.params={...defaults,...current().params};save();go('chat');toast(ui`已导入 ${chats.length} 个对话`);}catch(error){toast(error.message);}finally{e.target.value='';}};
+$('#import-input').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>20*1024**2)throw new Error(t('备份文件过大'));const data=JSON.parse(await file.text());if(data.format!=='lumen-studio'||!Array.isArray(data.chats)||!data.chats.every(c=>typeof c.title==='string'&&Array.isArray(c.messages)))throw new Error(t('不是有效的 Lumen Studio 会话备份'));const projectMap=new Map(),importedProjects=(Array.isArray(data.projects)?data.projects:[]).filter(p=>typeof p.id==='string'&&typeof p.name==='string'&&p.name.trim()).map(p=>{const id=uid();projectMap.set(p.id,id);return {id,name:p.name.slice(0,100),created:Number(p.created)||Date.now(),path:'projects/'+id};});const chats=data.chats.map(c=>({id:uid(),projectId:projectMap.get(c.projectId)||(state.activeProject==='*'?'':state.activeProject),title:c.title.slice(0,100),created:Number(c.created)||Date.now(),model:typeof c.model==='string'?c.model:'',params:{...defaults,...Object.fromEntries(Object.entries(c.params||{}).filter(([k])=>k in defaults))},messages:c.messages.filter(m=>['user','assistant','tool','system'].includes(m.role)).map(m=>({...m,id:uid(),content:typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text'&&typeof p.text==='string'||p.type==='image_url'&&/^data:image\/(?:png|jpeg|webp|gif);base64,/.test(p.image_url?.url||'')):''}))}));state.projects.push(...importedProjects);state.chats.unshift(...chats);if(chats.length){state.active=chats[0].id;state.activeProject=chats[0].projectId||'';}state.params={...defaults,...current().params,system:sessionSystemPrompt};save();go('chat');toast(ui`已导入 ${chats.length} 个对话`);}catch(error){toast(error.message);}finally{e.target.value='';}};
 function startDemo(){if(state.streaming)return toast(t('请先停止生成'));state.preview=true;state.connected=true;state.native=false;state.latency=0;state.models=[{id:'demo/local-model',name:t('界面演示模型'),type:'llm',params:'—',loaded:false,native:false}];state.model='demo/local-model';state.inspector=true;go('chat');toast(t('已进入演示模式'));}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();$('#shell')?.classList.remove('show-sidebar','show-inspector');}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();$('[data-action="new-chat"]')?.click();}if(e.key==='Tab'&&$('.modal')){const items=$$('button,input,textarea,select,a[href]',$('.modal')).filter(el=>!el.disabled&&el.offsetParent!==null);if(e.shiftKey&&document.activeElement===items[0]){e.preventDefault();items.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===items.at(-1)){e.preventDefault();items[0].focus();}}});
-window.addEventListener('beforeunload',event=>{for(const task of generations.values()){task.persistOutput=true;task.controller.abort();const m=task.assistant;if(m.status==='pending'){m.status='stopped';m.thinking=false;save();}}persistence.flush({keepalive:true});if(persistence.dirty){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{for(const task of generations.values()){if(task.remote)continue;task.persistOutput=true;task.controller.abort();const m=task.assistant;if(m.status==='pending'){m.status='stopped';m.thinking=false;save();}}persistence.flush({keepalive:true});if(persistence.dirty){event.preventDefault();event.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistence.flush({keepalive:true});});
 
 function modelIdentity(){try{return state.connected&&state.model&&!state.preview?JSON.stringify([normalizeBase(state.profile.baseUrl),state.model]):'';}catch{return '';}}
@@ -585,7 +595,7 @@ function sharedBanner(){
 }
 function renderSharedBanner(){const el=$('#shared-config-status');if(el)el.outerHTML=sharedBanner();}
 async function configRequest(method='GET',data){const source=normalizeBase(state.profile.baseUrl),model=state.model;const response=await fetch('/api/model-config'+(method==='GET'?'?'+new URLSearchParams({source,model}):''),{method,headers:{'Content-Type':'application/json'},body:method==='GET'?undefined:JSON.stringify({source,model,...data}),signal:AbortSignal.timeout(10000)});let result;try{result=await response.json();}catch{throw new Error(t('共享配置不可用，请重启服务'));}if(!response.ok&&response.status!==409)throw new Error(localizeError(result.error)||t('无法访问共享配置服务'));return {status:response.status,...result};}
-function applySharedRecord(record){shared.record=record;const effective={...defaults,...hostLoadConfig(),...record.params,...shared.dirty,system:current().params?.system??''};shared.effective={...effective};state.params=effective;const changed=JSON.stringify(current().params)!==JSON.stringify(effective);current().params={...effective};if(changed)save();syncParameterControls();renderSharedBanner();renderMetrics();}
+function applySharedRecord(record){shared.record=record;const effective={...defaults,...hostLoadConfig(),...record.params,...shared.dirty,system:sessionSystemPrompt};shared.effective={...effective};state.params=effective;const changed=JSON.stringify(current().params)!==JSON.stringify(effective);current().params={...effective};if(changed)save();syncParameterControls();renderSharedBanner();renderMetrics();}
 function syncParameterControls(){syncPromptPresetSelection();for(const el of $$('[data-param]')){const value=state.params[el.dataset.param];if(document.activeElement===el)continue;if(el.type==='checkbox')el.checked=!!value;else el.value=el.type==='number'?parameterValue(el.dataset.param):value??'';if(configurableParams.includes(el.dataset.param))el.disabled=!state.params['override_'+el.dataset.param];}for(const el of $$('[data-range]'))if(document.activeElement!==el){el.value=state.params[el.dataset.range];el.disabled=!state.params['override_'+el.dataset.range];}for(const b of $$('[data-override]')){const enabled=!!state.params['override_'+b.dataset.override];b.classList.toggle('overridden',enabled);b.setAttribute('aria-pressed',String(enabled));b.textContent=enabled?t('恢复默认'):Object.hasOwn(hostLoadConfig(),b.dataset.override)?t('自定义'):t('自定义');}}
 async function activateModelConfig(force=false){
  const id=modelIdentity();if(!id){renderSharedBanner();return false;}
@@ -626,7 +636,7 @@ function renderThinkingDock(){
 function drawThinkingDock(){
  const slot=$('#thinking-slot');if(!slot)return;const m=latestAssistant(),show=m&&(state.streaming||m.reasoning||m.interrupted||m.status==='truncated');if(!show){slot.innerHTML='';return;}
  if($('.thinking-dock',slot)?.dataset.message!==m.id)slot.innerHTML=thinkingDockHTML();const dock=$('.thinking-dock',slot);if(!dock)return;
- const live=state.streaming&&m.status==='pending';const status=m.status==='truncated'?t('输出达到接口限制'):m.status==='interrupted'?t('连接中断 · 内容已保留'):m.status==='stopped'?t('已停止生成'):live?(m.tool_calls?.length?t('正在接收工具调用'):m.thinking||m.reasoning&&!m.content?t('模型正在思考'):m.content?t('正在接收回答'):m.receivedBytes?t('接收中'):m.connectedAt?t('等待输出'):t('等待响应')):m.status==='reasoning_only'?t('仅返回思考'):t('思考已完成');
+ const live=state.streaming&&m.status==='pending';const status=m.reconnecting?t('正在重新连接生成任务'):m.status==='truncated'?t('输出达到接口限制'):m.status==='interrupted'?t('连接中断 · 内容已保留'):m.status==='stopped'?t('已停止生成'):live?(m.tool_calls?.length?t('正在接收工具调用'):m.thinking||m.reasoning&&!m.content?t('模型正在思考'):m.content?t('正在接收回答'):m.receivedBytes?t('接收中'):m.connectedAt?t('等待输出'):t('等待响应')):m.status==='reasoning_only'?t('仅返回思考'):t('思考已完成');
  $('.thinking-status',dock).textContent=status;$('.activity-dot',dock).classList.toggle('active',live);
  $('.thinking-elapsed',dock).textContent=(live?Math.max(0,(Date.now()-(m.startedAt||m.created))/1000).toFixed(0):((m.ms||0)/1000).toFixed(1))+' s';
  $('.thinking-expand',dock).hidden=!m.reasoning;
@@ -635,7 +645,7 @@ function drawThinkingDock(){
 }
 function showThinking(){const m=latestAssistant();if(!m?.reasoning)return;m.reasoningOpen=true;let detail=$(`[data-reasoning-id="${m.id}"]`);if(!detail){renderPage();detail=$(`[data-reasoning-id="${m.id}"]`);}if(detail){detail.open=true;populateReasoning(detail,m);const c=$('#conversation');c.scrollTo({top:c.scrollTop+detail.getBoundingClientRect().top-c.getBoundingClientRect().top-20,behavior:'instant'});}}
 function captureReasoningUI(){for(const detail of $$('.reasoning')){const m=current().messages.find(m=>m.id===detail.dataset.reasoningId);if(m){m.reasoningOpen=detail.open;m.reasoningScroll=$('pre',detail)?.scrollTop||0;}}}
-function completionNotice(m){if(m.role!=='assistant')return '';let text='';if(m.status==='truncated')text=ui`输出未完成 · ${m.finishReason||'length'}`;else if(m.interrupted)text=m.errorInfo||t('连接中断');else if(m.status==='reasoning_only')text=t('仅返回思考');else if(m.finishReason==='content_filter')text=t('输出已停止 · content_filter');return text?`<div class="completion-notice" role="status">${icon('info')}<div class="grow">${esc(text)}</div>${!state.streaming?button(t('继续生成'),'continue-output','send'):''}</div>`:'';}
+function completionNotice(m){if(m.role!=='assistant')return '';let text='';if(m.stopReason==='output_limit')text=t('回答与思考已达到预估 30,000 token，已自动停止。');else if(m.status==='truncated')text=ui`输出未完成 · ${m.finishReason||'length'}`;else if(m.interrupted)text=m.errorInfo||t('连接中断');else if(m.status==='reasoning_only')text=t('仅返回思考');else if(m.finishReason==='content_filter')text=t('输出已停止 · content_filter');return text?`<div class="completion-notice" role="status">${icon('info')}<div class="grow">${esc(text)}</div>${!state.streaming?button(t('继续生成'),'continue-output','send'):''}</div>`:'';}
 function continueOutput(){if(state.streaming||state.preparing)return;const m=latestAssistant();if(!m)return;const messages=[...current().messages];messages.push({id:uid(),role:'user',content:m.content?t('请从上一次中断的位置继续完成回答，不要重复已经输出的内容。'):t('请继续完成原问题，并给出最终回答。'),created:Date.now()});send({regenerateMessages:messages});}
 document.addEventListener('toggle',event=>{const detail=event.target;if(!detail.matches?.('details.reasoning'))return;const m=current().messages.find(m=>m.id===detail.dataset.reasoningId);if(m){m.reasoningOpen=detail.open;if(detail.open)populateReasoning(detail,m);else{const pre=$('pre',detail);pre.replaceChildren();pre.dataset.renderedLength='0';}}},true);
 document.addEventListener('scroll',event=>{const pre=event.target;if(!pre.matches?.('.reasoning pre'))return;const m=current().messages.find(m=>m.id===pre.closest('.reasoning').dataset.reasoningId);if(m)m.reasoningScroll=pre.scrollTop;},true);
@@ -644,7 +654,7 @@ function usageStats(usage){if(!usage)return {cached:null,prompt:null,total:null}
 function metricValues(){const message=[...current().messages].reverse().find(m=>m.role==='assistant'&&!m.error&&(!state.model||m.model===state.model)),usage=usageStats(message?.usage);const actual=hostLoadConfig();const model=state.models.find(m=>m.id===state.model);const cache=usage.cached===null?t('未返回'):usage.cached.toLocaleString()+' tokens'+(usage.prompt>0?' · '+(usage.cached/usage.prompt*100).toFixed(1)+'%':'');const used=usage.total===null?t('未返回'):usage.total.toLocaleString();const window=actual.context_length?actual.context_length.toLocaleString()+' tokens':state.connected?t('服务端未返回'):t('等待连接');return {cache,used,window,context:actual.context_length||null,multiple:(model?.instances?.length||0)>1};}
 function metricsHTML(){const m=metricValues();return ui`<div class="request-metrics" id="request-metrics" aria-live="polite"><span class="current-received" title="输出用量">已接收 <b>${receptionLabel(latestAssistant())}</b></span><span title="累计用量">对话累计 <b>${conversationReceived()}</b></span><span title="缓存命中">${icon('bolt')}缓存命中 <b>${esc(m.cache)}</b></span><span title="输入和输出用量">本次用量 <b>${esc(m.used)}</b></span><span title="上下文窗口${m.multiple?t(' · 首个实例'):''}">窗口 <b>${esc(m.window)}${m.multiple?t(' · 多实例'):''}</b></span></div>`;}
 function renderMetrics(){const el=$('#request-metrics');if(el)el.outerHTML=metricsHTML();}
-function importModelConfig(){if(!modelIdentity())return toast(t('请先连接模型'));const input=document.createElement('input');input.type='file';input.accept='.json';input.onchange=async()=>{try{const f=input.files[0];if(!f)return;if(f.size>2*1024**2)throw new Error(t('预设文件请控制在 2 MB 内'));const parsed=JSON.parse(await f.text());const params=parseModelPreset(parsed);if(!Object.keys(params).length)throw new Error(t('预设里没有识别到可同步的参数'));openModal(t('导入并共享模型配置'),`<p class="hint"></p><pre class="raw-code">${esc(JSON.stringify(params,null,2))}</pre><div class="modal-footer">${button(t('取消'),'close-modal')}${button(t('发布这些参数'),'confirm','upload','primary')}</div>`);$('.modal [data-action="confirm"]').onclick=async()=>{if(!shared.record&&!(await activateModelConfig()))return;for(const [key,value]of Object.entries(params)){if(key==='system'){state.params.system=value;current().params={...state.params};save();continue;}shared.baseline[key]=shared.record.params[key];shared.dirty[key]=value;}shared.status='dirty';closeModal();if(await flushShared()){toast(t('预设已导入并共享'));renderInspector();}};}catch(e){toast(e.message);}};input.click();}
+function importModelConfig(){if(!modelIdentity())return toast(t('请先连接模型'));const input=document.createElement('input');input.type='file';input.accept='.json';input.onchange=async()=>{try{const f=input.files[0];if(!f)return;if(f.size>2*1024**2)throw new Error(t('预设文件请控制在 2 MB 内'));const parsed=JSON.parse(await f.text());const params=parseModelPreset(parsed);if(!Object.keys(params).length)throw new Error(t('预设里没有识别到可同步的参数'));openModal(t('导入并共享模型配置'),`<p class="hint"></p><pre class="raw-code">${esc(JSON.stringify(params,null,2))}</pre><div class="modal-footer">${button(t('取消'),'close-modal')}${button(t('发布这些参数'),'confirm','upload','primary')}</div>`);$('.modal [data-action="confirm"]').onclick=async()=>{if(!shared.record&&!(await activateModelConfig()))return;for(const [key,value]of Object.entries(params)){if(key==='system'){sessionSystemPrompt=value;selectedPromptPreset='';state.params.system=value;current().params={...state.params};save();continue;}shared.baseline[key]=shared.record.params[key];shared.dirty[key]=value;}shared.status='dirty';closeModal();if(await flushShared()){toast(t('预设已导入并共享'));renderInspector();}};}catch(e){toast(e.message);}};input.click();}
 function parseModelPreset(data){
  const out={};const direct=data.params||data;if(direct&&typeof direct==='object')for(const k of Object.keys(defaults))if(Object.hasOwn(direct,k)&&typeof direct[k]===typeof defaults[k])out[k]=direct[k];
  const mapping={'llm.prediction.temperature':'temperature','llm.prediction.topPSampling':'top_p','llm.prediction.topKSampling':'top_k','llm.prediction.repeatPenalty':'repeat_penalty','llm.prediction.presencePenalty':'presence_penalty','llm.prediction.frequencyPenalty':'frequency_penalty','llm.prediction.maxPredictedTokens':'max_tokens','llm.prediction.seed':'seed','llm.prediction.stopStrings':'stop','llm.prediction.systemPrompt':'system','llm.load.contextLength':'context_length','llm.load.evalBatchSize':'eval_batch_size','llm.load.flashAttention':'flash_attention','llm.load.offloadKVCacheToGpu':'offload_kv_cache_to_gpu','llm.load.numExperts':'num_experts'};
@@ -674,12 +684,13 @@ async function pullWorkspace(){
   const profile=state.profiles.find(p=>p.id===state.profile.id),connectionChanged=profile&&profile._etag!==state.profile._etag;
   if(profile){state.profile={...profile};if(connectionChanged){delete temporaryKeys[profile.id];apiKey='';}}
   applySidebarRecord(record);
-  if(changed){state.draft=$('#prompt')?.value??state.draft;state.params={...defaults,...active.params};if(active.model)state.model=active.model;renderPage();await activateModelConfig();}
+  if(changed){state.draft=$('#prompt')?.value??state.draft;state.params={...defaults,...active.params,system:sessionSystemPrompt};if(active.model)state.model=active.model;renderPage();await activateModelConfig();}
   if(connectionChanged&&state.profile.baseUrl)await discover(true);
  }catch{/* An unavailable poll must not overwrite local state or interrupt typing. */}
  finally{pollingWorkspace=false;}
 }
-setInterval(()=>{if(document.visibilityState==='hidden')return;pullWorkspace();pullShared();if(Date.now()-hostRefreshAt>15000&&!state.streaming)refreshHostConfig(true);},3000);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pullShared();});
+setInterval(()=>{if(document.visibilityState==='hidden')return;resumeServerGenerations();pullWorkspace();pullShared();if(Date.now()-hostRefreshAt>15000&&!state.streaming)refreshHostConfig(true);},3000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){resumeServerGenerations();pullShared();}});
 render();
+resumeServerGenerations();
 if(state.profile.baseUrl)setTimeout(()=>discover(true),100);

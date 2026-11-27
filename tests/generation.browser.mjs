@@ -73,11 +73,11 @@ try{
   assert.equal((await fetch(url+'/api/workspace',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({changes:{chats:[{id:'a',baseEtag:original._etag,chat:{...original.chat,title:'Remote original'}}]}})})).status,200);
   await page.waitForTimeout(220);chunk('D-output','D 在后台冲突后继续。');
   await open('a');await page.getByText('D 在后台冲突后继续。',{exact:false}).first().waitFor();await page.locator('#send').click();await wait(()=>requests.get('D-output').closed,'stop conflicted task');
-  let copy;await wait(async()=>{copy=(await record()).data.chats.find(chat=>chat.id!=='a'&&chat.id!=='b'&&chat.id!==newId);return !!copy;},'conflict copy saved on stop');
-  await saved();await open(copy.id);await page.getByText('D 在后台冲突后继续。',{exact:false}).first().waitFor();assert.equal((await(await fetch(url+'/api/chats/a')).json()).chat.title,'Remote original');
+  await wait(async()=>(await record()).data.chats.find(chat=>chat.id==='a').messages.at(-1).status==='stopped','server reply saved on stop');
+  await wait(async()=>await spinner('a').count()===0,'server completion reflected');await saved();await open('a');await page.getByText('D 在后台冲突后继续。',{exact:false}).first().waitFor();assert.equal((await(await fetch(url+'/api/chats/a')).json()).chat.title,'Remote original');assert.equal((await record()).data.chats.length,3);
   await open(newId);
   await page.reload();await page.getByText('C 在设置页面期间继续。',{exact:false}).first().waitFor();assert.equal(await page.locator('.chat-generation-spinner').count(),0);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);await page.screenshot({path:join(qa,label+'-completed.png')});await context.close();
-  console.log('PASS '+label+': new chat, connection/model changes, stop isolation, offscreen completion, moves, conflict copies, disk save and reload');
+  console.log('PASS '+label+': new chat, connection/model changes, stop isolation, offscreen completion, moves, concurrent metadata merge, disk save and reload');
  }
 }finally{await browser?.close();for(const request of requests.values())request.response.destroy();if(server?.exitCode===null){const exit=once(server,'exit');server.kill();await exit;}mock.closeAllConnections();await new Promise(r=>mock.close(r));}

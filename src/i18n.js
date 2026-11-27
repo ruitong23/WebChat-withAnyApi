@@ -175,6 +175,11 @@ export const english = Object.freeze({
   '收起参数设置':'Close parameters',
   '预设':'Presets',
   "系统提示词预设":"System prompt presets",
+  "生成任务连接失败":"Cannot connect to the generation task",
+  "生成任务未启动，请手动重试。":"The generation task did not start. Please retry manually.",
+  "正在重新连接生成任务":"Reconnecting to generation",
+  "回答与思考已达到预估 30,000 token，已自动停止。":"Answer and reasoning reached approximately 30,000 tokens. Generation stopped automatically.",
+
   "自定义提示词":"Custom prompt",
   "另存为新预设":"Save as new",
   "更新当前预设":"Update preset",

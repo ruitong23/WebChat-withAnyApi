@@ -1,7 +1,7 @@
 import {readFile,writeFile,mkdir,copyFile,cp,rm} from 'node:fs/promises';
 const root=new URL('../',import.meta.url);
 const frontend=['index.html','style.css','app.js','rendering.js','relay.js','vertex-express.js','vertex-catalog.js','i18n.js','response-utils.js','workspace-client.js'];
-const backend=['relay.js','vertex-express.js','vertex-catalog.js','shared-store.mjs','workspace-store.mjs','workspace-public.mjs'];
+const backend=['generation-runner.mjs','generation-output.mjs','response-utils.js','relay.js','vertex-express.js','vertex-catalog.js','shared-store.mjs','workspace-store.mjs','workspace-public.mjs'];
 for(const directory of ['dist/public/','dist/server/','dist/deploy/'])await mkdir(new URL(directory,root),{recursive:true});
 for(const name of frontend)await copyFile(new URL('src/'+name,root),new URL('dist/public/'+name,root));
 await cp(new URL('src/vendor/',root),new URL('dist/public/vendor/',root),{recursive:true});

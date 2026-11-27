@@ -1,3 +1,4 @@
+import {createGenerationRunner} from '../src/generation-runner.mjs';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {relay} from '../src/relay.js';
@@ -7,13 +8,16 @@ import {createModelConfigStore} from '../src/shared-store.mjs';
 import {createWorkspaceStore} from '../src/workspace-store.mjs';
 import {publicRecord,publicResult} from '../src/workspace-public.mjs';
 import {networkInterfaces} from 'node:os';
-import {join} from 'node:path';
+import {join,dirname} from 'node:path';
 const port=Number(process.env.PORT||4177),root=new URL('../src/',import.meta.url);
 const dataDirectory=process.env.LUMEN_DATA_DIR||fileURLToPath(new URL('../data/',import.meta.url));
 const modelStore=createModelConfigStore(process.env.LUMEN_CONFIG_FILE||join(dataDirectory,'model-configs.json'));
-const workspaceStore=createWorkspaceStore(process.env.LUMEN_WORKSPACE_FILE||join(dataDirectory,'workspace.json'));
+const workspaceFile=process.env.LUMEN_WORKSPACE_FILE||join(dataDirectory,'workspace.json');
+const workspaceStore=createWorkspaceStore(workspaceFile);
 // Finish migration/recovery before announcing a healthy service.
 await workspaceStore.revision();
+const generations=createGenerationRunner({directory:join(dirname(workspaceFile),'generation-tasks'),store:workspaceStore,allowPrivate:process.env.LUMEN_ALLOW_PRIVATE!=='false'});
+await generations.recover();
 const assets={'/':['index.html','text/html; charset=utf-8'],'/index.html':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/relay.js':['relay.js','text/javascript; charset=utf-8'],'/vertex-express.js':['vertex-express.js','text/javascript; charset=utf-8'],'/vertex-catalog.js':['vertex-catalog.js','text/javascript; charset=utf-8'],'/i18n.js':['i18n.js','text/javascript; charset=utf-8'],'/response-utils.js':['response-utils.js','text/javascript; charset=utf-8'],'/workspace-client.js':['workspace-client.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
 assets['/rendering.js']=['rendering.js','text/javascript; charset=utf-8'];
 const vendorAssets=JSON.parse(await readFile(new URL('vendor/manifest.json',root),'utf8'));
@@ -52,6 +56,17 @@ const server=http.createServer(async(req,res)=>{
   const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>512000)return json({error:'配置请求过大'},413);chunks.push(chunk);}
   try{const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));const result=await modelStore.update(data.source,data.model,data.revision,data.patch);return json(result,result.conflict?409:200);}catch(e){return json({error:e.message},400);}
  }
+ if(path==='/api/generations'){
+  if(req.method==='GET')return json({tasks:generations.list()});
+  if(req.method!=='POST')return json({error:'仅支持 GET 与 POST'},405);
+  return json({task:await generations.start(await readJSON(req,24*1024**2))});
+ }
+ if(path.startsWith('/api/generations/')){
+  const match=path.match(/^\/api\/generations\/([a-zA-Z0-9_-]{1,100})(\/stop)?$/);if(!match)return json({error:'生成任务路径无效'},400);
+  if(match[2]){if(req.method!=='POST')return json({error:'仅支持 POST'},405);return json({task:await generations.stop(match[1])});}
+  if(req.method!=='GET')return json({error:'仅支持 GET'},405);
+  const after=Number(new URL(req.url,'http://localhost').searchParams.get('after')||-1),task=await generations.get(match[1],after,abort.signal);if(res.destroyed)return;return json({task});
+ }
  if(path==='/api/relay'){if(req.method!=='POST')return json({error:'只接受 POST 请求'},405);const body=await readJSON(req,24*1024**2),headers={...req.headers};delete headers['content-length'];if(!body.apiKey)body.apiKey=await workspaceStore.keyFor(body.baseUrl,body.profileId);const request=new Request((req.headers.origin||publicOrigin)+req.url,{method:req.method,headers,body:JSON.stringify(body),signal:abort.signal});const response=await relay(request,{allowPrivate:process.env.LUMEN_ALLOW_PRIVATE!=='false'});res.writeHead(response.status,{...Object.fromEntries(response.headers),'X-Accel-Buffering':'no'});if(response.body){for await(const chunk of response.body){if(res.destroyed)break;if(!res.write(Buffer.from(chunk)))await new Promise(resolve=>res.once('drain',resolve));}}res.end();return;}
  const asset=assets[path];if(!asset){res.writeHead(404);res.end('Not found');return;}res.writeHead(200,{'Content-Type':asset[1],'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(await readFile(new URL(asset[0],root)));
  }catch(error){if(!res.headersSent)res.writeHead(error.status||500,{'Content-Type':'application/json','Cache-Control':'no-store'});if(!res.destroyed)res.end(JSON.stringify({error:error.message}));}
@@ -68,8 +83,8 @@ server.listen(port,process.env.LUMEN_HOST||'0.0.0.0',()=>{
  console.log('  Close this window, or press Ctrl+C, to stop the website.\n');
  if(process.argv.includes('--open')&&process.platform==='win32'){const opener=spawn('rundll32.exe',['url.dll,FileProtocolHandler',url],{windowsHide:true,stdio:'ignore'});opener.on('error',()=>{});opener.unref();}
 });
-process.on('SIGTERM',()=>{server.close();server.closeAllConnections();});
-process.on('SIGINT',()=>{server.close();server.closeAllConnections();});
+let stopping=false;async function stopServer(){if(stopping)return;stopping=true;server.close();await generations.shutdown();server.closeAllConnections();}
+process.on('SIGTERM',stopServer);process.on('SIGINT',stopServer);
 // The server belongs to its launching console, including when Windows terminates
 // cmd.exe without delivering the normal console-close signal to Node.
 if(process.platform==='win32'){

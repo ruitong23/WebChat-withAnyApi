@@ -150,9 +150,10 @@ export function createWorkspaceStore(filePath){
    index.data.chats=old?index.data.chats.map(c=>c.id===ref.id?ref:c):[ref,...index.data.chats];writes.set(ref.path,chat);etags[chat.id]=ref._etag;
   };
   for(const change of changes.chats||[]){const old=index.data.chats.find(c=>c.id===change.id);
-   const stale=(old?._etag??null)!==(change.baseEtag??null);
+   let stale=(old?._etag??null)!==(change.baseEtag??null);
    if(change.deleted){if(stale){conflicts.push('chats:'+change.id);continue;}if(old){removals.add(old.path);index.data.chats=index.data.chats.filter(c=>c.id!==change.id);}continue;}
-   let chat;if(change.chat){chat=change.chat;if(chat.id!==change.id)throw new Error('对话数据格式无效');}
+   let chat;if(change.meta){if(!old)throw new Error('对话不存在');if(!object(change.meta)||Object.keys(change.meta).some(k=>!['title','projectId','params','model'].includes(k)))throw new Error('对话元数据无效');const latest=await read(target(old.path));stale=Object.keys(change.meta).some(k=>JSON.stringify(latest[k])!==JSON.stringify(change.metaBase?.[k])&&JSON.stringify(latest[k])!==JSON.stringify(change.meta[k]));chat={...latest,...change.meta};}
+   else if(change.chat){chat=change.chat;if(chat.id!==change.id)throw new Error('对话数据格式无效');}
    else{if(!old)throw new Error('对话不存在');chat={...(await read(target(old.path))),...Object.fromEntries(['projectId','title'].filter(k=>Object.hasOwn(change,k)).map(k=>[k,change[k]]))};}
    if(stale&&(!old||etag(chat)!==old._etag)){const id=randomUUID();remaps.chats[change.id]=id;chat={...chat,id,title:chat.title+(old?'（冲突副本）':'（恢复副本）')};conflicts.push('chats:'+change.id);}
    if(chat.projectId&&!index.data.projects.some(p=>p.id===chat.projectId))chat={...chat,projectId:''};saveChat(chat);
@@ -172,8 +173,15 @@ export function createWorkspaceStore(filePath){
   const journal={version:1,index,writes:[...writes].map(([path,value])=>({path,value})),removals:[...removals]};await atomicWrite(journalPath,journal);await finish(journal);
   return {record:withProfileEtags(page(index)),etags,projectEtags,remaps,conflicts};
  };
+ const finishGeneration=(id,messageId,generationId,message)=>enqueue(async()=>{
+  const index=await loadIndex();let result;try{result=await getChatFrom(index,id);}catch(error){if(error.status===404)return null;throw error;}
+  const previous=result.chat.messages.find(m=>m.id===messageId);if(!previous||previous.generationId!==generationId)return null;
+  const next={...previous,...message,id:messageId,generationId};if(JSON.stringify(next)===JSON.stringify(previous))return result;
+  const chat={...result.chat,messages:result.chat.messages.map(m=>m.id===messageId?next:m)};
+  return patch({chats:[{id,baseEtag:result._etag,chat}]});
+ });
  const withProfileEtags=record=>({...record,data:{...record.data,profiles:(record.data.profiles||[]).map(p=>({...p,_etag:etag({...publicProfile(p,record.data.keys),hasKey:undefined,secret:record.data.keys?.[p.id]??record.data.keys?.[p.baseUrl]??''})}))}});
- return {get:()=>enqueue(load),revision:()=>enqueue(async()=>(await loadIndex()).revision),keyFor:(base,id)=>enqueue(async()=>{const {data}=await loadIndex();const p=matchingProfile(data.profiles||[],base,id);return p?(data.keys?.[p.id]??data.keys?.[p.baseUrl]??''):'';}),getSidebar:options=>enqueue(async()=>withProfileEtags(page(await loadIndex(),options))),getChat:id=>enqueue(async()=>getChatFrom(await loadIndex(),id)),patch:changes=>enqueue(()=>patch(changes)),update:(revision,data)=>enqueue(async()=>{
+ return {finishGeneration,get:()=>enqueue(load),revision:()=>enqueue(async()=>(await loadIndex()).revision),keyFor:(base,id)=>enqueue(async()=>{const {data}=await loadIndex();const p=matchingProfile(data.profiles||[],base,id);return p?(data.keys?.[p.id]??data.keys?.[p.baseUrl]??''):'';}),getSidebar:options=>enqueue(async()=>withProfileEtags(page(await loadIndex(),options))),getChat:id=>enqueue(async()=>getChatFrom(await loadIndex(),id)),patch:changes=>enqueue(()=>patch(changes)),update:(revision,data)=>enqueue(async()=>{
   if(!Number.isSafeInteger(revision)||revision<0)throw new Error('工作空间版本无效');
   const clean=validateWorkspace(data),previous=await load();if(revision!==previous.revision)return {conflict:true,record:previous};
   if(!Object.hasOwn(clean,'keys')&&previous.data.keys)clean.keys=previous.data.keys;

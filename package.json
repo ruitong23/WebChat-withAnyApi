@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/relay.test.mjs tests/vertex-express.test.mjs tests/vertex-catalog.test.mjs tests/shared-store.test.mjs tests/response-utils.test.mjs tests/i18n.test.mjs tests/workspace.test.mjs tests/rendering.test.mjs",
+    "test": "node --test tests/relay.test.mjs tests/vertex-express.test.mjs tests/vertex-catalog.test.mjs tests/shared-store.test.mjs tests/response-utils.test.mjs tests/i18n.test.mjs tests/workspace.test.mjs tests/rendering.test.mjs tests/generations.test.mjs",
     "test:server": "node tests/server.browser.mjs",
     "test:projects": "node tests/projects.browser.mjs",
     "test:paging": "node tests/paging.browser.mjs",
@@ -19,6 +19,7 @@
     "validate": "node scripts/validate-artifact.mjs",
     "test:rendering": "node tests/rendering.browser.mjs",
     "test:prompt-presets": "node tests/prompt-presets.browser.mjs",
-    "test:inspector-layout": "node tests/inspector-layout.browser.mjs"
+    "test:inspector-layout": "node tests/inspector-layout.browser.mjs",
+    "test:background": "node tests/background-generation.browser.mjs"
   }
 }

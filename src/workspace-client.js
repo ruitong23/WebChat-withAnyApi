@@ -83,7 +83,11 @@ function createPartialPersistence({initial,read,onStatus,onSaved}){
   for(const p of oldProfiles.values())profiles.push({id:p.id,baseEtag:p._etag??null,deleted:true});
   const before=new Map((baseline.chats||[]).map(c=>[c.id,c]));
   for(const c of snapshot.chats||[]){if(deletions.has(c.id))continue;const old=before.get(c.id),baseEtag=old?._etag??c._etag??null;
-   if(Array.isArray(c.messages)){if(!old||Array.isArray(old.messages)&&!equal(clean(old),clean(c)))chats.push({id:c.id,baseEtag,chat:clean(c)});}
+   if(Array.isArray(c.messages)){if(!old||Array.isArray(old.messages)&&!equal(clean(old),clean(c))){
+    const metaKeys=['title','projectId','params','model'],changed=old?Object.keys(clean(c)).filter(k=>k!=='id'&&!equal(c[k],old[k])):[];
+    if(old&&changed.length&&changed.every(k=>metaKeys.includes(k)))chats.push({id:c.id,baseEtag,meta:Object.fromEntries(changed.map(k=>[k,c[k]])),metaBase:Object.fromEntries(changed.map(k=>[k,old[k]]))});
+    else chats.push({id:c.id,baseEtag,chat:clean(c)});
+   }}
    else if(old&&(old.projectId||'')!==(c.projectId||'')||old&&old.title!==c.title)chats.push({id:c.id,baseEtag,projectId:c.projectId||'',title:c.title});
   }
   for(const [id,baseEtag]of deletions)chats.push({id,baseEtag,deleted:true});
